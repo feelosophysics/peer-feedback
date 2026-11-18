@@ -1,0 +1,3769 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>동료평가 상호 피드백 초안 생성기</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-alt: #f8fafc;
+      --border: #e2e8f0;
+      --border-strong: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #475569;
+      --text-subtle: #64748b;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-soft: #eff6ff;
+      --danger: #dc2626;
+      --danger-hover: #b91c1c;
+      --danger-soft: #fef2f2;
+      --success: #059669;
+      --success-soft: #ecfdf5;
+      --warn: #d97706;
+      --warn-soft: #fffbeb;
+      --accent: #7c3aed;
+      --accent-soft: #f5f3ff;
+      --radius: 12px;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.04);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px 16px 64px;
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%);
+      color: #ffffff;
+      padding: 22px 26px;
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .header-top {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .header-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .header-desc {
+      margin: 0;
+      font-size: 0.9rem;
+      color: #dbeafe;
+    }
+
+    .privacy-caveat {
+      font-size: 0.8rem;
+      color: #e2e8f0;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 8px 12px;
+      border-radius: 8px;
+      border-left: 3px solid #60a5fa;
+    }
+
+    /* Banner */
+    .recovery-banner {
+      display: none;
+      background: var(--warn-soft);
+      border: 1px solid #fcd34d;
+      border-left: 5px solid var(--warn);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      box-shadow: var(--shadow);
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .recovery-banner.visible {
+      display: flex;
+    }
+
+    .recovery-title {
+      font-weight: 700;
+      color: #92400e;
+      font-size: 0.98rem;
+    }
+
+    .recovery-desc {
+      font-size: 0.88rem;
+      color: #78350f;
+    }
+
+    .recovery-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    /* Form Controls */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    @media (max-width: 780px) {
+      .grid-2, .grid-3 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      font-size: 0.92rem;
+      font-family: inherit;
+      color: var(--text);
+      background: #ffffff;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
+    .checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.83rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    .help-text {
+      font-size: 0.79rem;
+      color: var(--text-subtle);
+    }
+
+    /* Buttons */
+    button {
+      font-family: inherit;
+      font-size: 0.88rem;
+      font-weight: 600;
+      padding: 9px 14px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background-color 0.15s, border-color 0.15s, transform 0.05s, opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: #ffffff;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: var(--danger-hover);
+    }
+
+    .btn-danger-outline {
+      background: #ffffff;
+      color: var(--danger);
+      border-color: #fca5a5;
+    }
+    .btn-danger-outline:hover:not(:disabled) {
+      background: var(--danger-soft);
+    }
+
+    .btn-secondary {
+      background: var(--surface-alt);
+      color: var(--text);
+      border-color: var(--border-strong);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: #e2e8f0;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: #ffffff;
+    }
+    .btn-success:hover:not(:disabled) {
+      background: #047857;
+    }
+
+    .btn-accent {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-color: #ddd6fe;
+    }
+    .btn-accent:hover:not(:disabled) {
+      background: #ede9fe;
+    }
+
+    .btn-sm {
+      padding: 6px 10px;
+      font-size: 0.8rem;
+    }
+
+    /* Recorder Panel */
+    .recorder-stage {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .recorder-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .timer-box {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .timer-display {
+      font-variant-numeric: tabular-nums;
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: var(--text);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: #e2e8f0;
+      color: #334155;
+    }
+
+    .status-badge.recording {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border: 1px solid #fecaca;
+    }
+
+    .status-badge.recording .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+      animation: pulse 1.2s infinite;
+    }
+
+    .status-badge.paused {
+      background: var(--warn-soft);
+      color: var(--warn);
+      border: 1px solid #fde68a;
+    }
+
+    .status-badge.processing {
+      background: var(--primary-soft);
+      color: var(--primary);
+      border: 1px solid #bfdbfe;
+    }
+
+    .status-badge.done {
+      background: var(--success-soft);
+      color: var(--success);
+      border: 1px solid #a7f3d0;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+
+    .sub-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      font-size: 0.83rem;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sub-metric-item strong {
+      color: var(--text);
+    }
+
+    canvas#waveformCanvas {
+      width: 100%;
+      height: 68px;
+      background: #0f172a;
+      border-radius: 8px;
+      display: block;
+    }
+
+    .recorder-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .chunk-status-box {
+      display: none;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.84rem;
+      color: var(--text-muted);
+      gap: 8px;
+      flex-direction: column;
+    }
+
+    .chunk-status-box.visible {
+      display: flex;
+    }
+
+    .chunk-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chunk-pill {
+      font-size: 0.77rem;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+    }
+
+    .chunk-pill.done {
+      background: var(--success-soft);
+      color: var(--success);
+      border-color: #a7f3d0;
+    }
+
+    .chunk-pill.processing {
+      background: var(--primary-soft);
+      color: var(--primary);
+      border-color: #bfdbfe;
+    }
+
+    .chunk-pill.error {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border-color: #fecaca;
+    }
+
+    /* Privacy & Disposal Audit */
+    .audit-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    @media (max-width: 860px) {
+      .audit-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    .audit-stat {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .audit-stat-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-subtle);
+    }
+
+    .audit-stat-value {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .audit-stat-value.safe {
+      color: var(--success);
+    }
+
+    .audit-stat-value.active-data {
+      color: var(--warn);
+    }
+
+    .audit-log {
+      background: #0f172a;
+      color: #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      max-height: 150px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .log-entry.ok { color: #6ee7b7; }
+    .log-entry.warn { color: #fcd34d; }
+    .log-entry.err { color: #fca5a5; }
+    .log-entry.info { color: #93c5fd; }
+
+    /* Results Section */
+    .results-section {
+      display: none;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .results-section.visible {
+      display: flex;
+    }
+
+    .role-banner {
+      background: var(--primary-soft);
+      border: 1px solid #bfdbfe;
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .role-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.86rem;
+      color: #1e3a8a;
+    }
+
+    .refine-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 12px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+
+    .refine-toolbar .field {
+      min-width: 170px;
+      flex: 1;
+    }
+
+    .points-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 360px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .point-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.88rem;
+    }
+
+    .point-item input[type="checkbox"] {
+      margin-top: 3px;
+      width: 16px;
+      height: 16px;
+      accent-color: var(--primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .point-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .point-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .tag-reviewer { background: #dbeafe; color: #1e40af; }
+    .tag-reviewee { background: #d1fae5; color: #065f46; }
+    .tag-common { background: #e2e8f0; color: #334155; }
+    .tag-cat { background: #f3e8ff; color: #6b21a8; }
+
+    .draft-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .draft-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .draft-title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .draft-textarea {
+      min-height: 220px;
+      resize: vertical;
+      line-height: 1.65;
+      font-size: 0.93rem;
+    }
+
+    .draft-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.8rem;
+      color: var(--text-subtle);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .error-box {
+      display: none;
+      background: var(--danger-soft);
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      white-space: pre-wrap;
+    }
+
+    .error-box.visible {
+      display: block;
+    }
+
+    .transcript-box {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .transcript-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .transcript-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .speech-badge {
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #475569;
+    }
+
+    .speech-badge.active {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .speech-badge.unsupported {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .interim-line {
+      font-size: 0.8rem;
+      color: var(--primary);
+      min-height: 1.2em;
+      font-style: italic;
+    }
+
+    textarea#liveTranscriptTextarea {
+      min-height: 86px;
+      resize: vertical;
+      font-size: 0.86rem;
+      line-height: 1.5;
+      background: var(--surface-alt);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-top">
+        <h1>동료평가 상호 피드백 초안 생성기</h1>
+        <div class="header-badges">
+          <span class="pill">단일 HTML 무설치</span>
+          <span class="pill">게이트웨이 · Gemini 3.x+</span>
+          <span class="pill">하이브리드 음성인식 · 즉시 폐기</span>
+        </div>
+      </div>
+      <p class="header-desc">
+        브라우저 내장 마이크(또는 음성 파일)로 동료평가 대화를 녹음하면 평가자·피평가자 화자를 구분해 핵심 대화 요약과 양쪽 피드백 초안을 동시에 작성합니다.
+      </p>
+      <div class="privacy-caveat">
+        <strong>개인정보 안내:</strong> 기본 제공자인 <strong>호환 게이트웨이 API</strong> 또는 <strong>Google AI Studio 무료 API</strong>를 선택해 사용할 수 있습니다. 로컬 디스크에는 파일을 저장하지 않으며(충돌 복구용 브라우저 임시 버퍼 제외), 분석 완료 즉시 서버 업로드 파일(<code>files.delete</code>)과 로컬 음성·대본 버퍼를 파기합니다. 음성을 외부로 전혀 보내고 싶지 않다면 <strong>'음성 외부 무전송(브라우저 음성인식 대본만 전송)'</strong> 모드를 선택하세요.
+      </div>
+    </header>
+
+    <!-- Crash Recovery Banner -->
+    <section id="recoveryBanner" class="recovery-banner" aria-live="polite">
+      <div class="recovery-title">중단된 이전 평가 세션 데이터가 브라우저 임시 버퍼(IndexedDB)에서 발견되었습니다</div>
+      <div id="recoveryDesc" class="recovery-desc"></div>
+      <div class="recovery-actions">
+        <button id="btnRecoverProcess" class="btn-primary btn-sm">복구하여 초안 생성 후 음성 즉시 폐기</button>
+        <button id="btnRecoverDiscard" class="btn-danger-outline btn-sm">복구하지 않고 즉시 영구 파기</button>
+      </div>
+    </section>
+
+    <!-- Error Alert -->
+    <div id="globalError" class="error-box" role="alert"></div>
+
+    <!-- Step 1: API Settings & Mission Memo -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title"><span class="step-num">1</span> API 제공자 · 모델 설정 및 선택 메모</h2>
+        <div class="input-row">
+          <button id="btnSyncModels" class="btn-secondary btn-sm" type="button">모델 목록 동기화</button>
+          <button id="btnClearKey" class="btn-danger-outline btn-sm" type="button">키 즉시 삭제</button>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="providerSelect">API 제공자 선택</label>
+          <select id="providerSelect">
+            <option value="gateway" selected>OpenAI / Anthropic 호환 게이트웨이 API (Virtual Key / 통합 토큰)</option>
+            <option value="google_direct">Google AI Studio 직접 호출 (generativelanguage.googleapis.com · 무료 키)</option>
+          </select>
+          <span id="providerHelpText" class="help-text">OpenAI/Anthropic 호환 게이트웨이의 Base URL과 Virtual Key를 입력해 0.5x 가성비 모델(gemini-3-flash, claude-haiku-4, gpt-5.4-mini) 등을 사용할 수 있습니다.</span>
+        </div>
+
+        <div class="field">
+          <label id="apiKeyLabel" for="apiKeyInput">게이트웨이 Virtual Key / API Key</label>
+          <div class="input-row">
+            <input id="apiKeyInput" type="password" placeholder="Virtual Key 또는 AIza... (기본: 탭을 닫으면 자동 삭제됨)" autocomplete="off" />
+            <button id="btnToggleKey" class="btn-secondary btn-sm" type="button" title="API 키 보기/숨기기">보기</button>
+          </div>
+          <label class="checkbox-label">
+            <input id="rememberKeyCheckbox" type="checkbox" />
+            <span>이 브라우저에 API 키·주소 기억하기 (개인 PC 전용 · 공용 환경에서는 체크 해제 권장)</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="gatewayBaseUrlField" class="field">
+        <label for="gatewayBaseUrlInput">게이트웨이 API Base URL (북마크 해시 <code>#api=주소</code> 자동 입력 지원)</label>
+        <input id="gatewayBaseUrlInput" type="text" placeholder="예: https://api.example.com (북마크 #api=주소 로도 자동 입력 가능)" autocomplete="off" />
+        <span class="help-text">시크릿 창이나 공용 PC에서 매번 주소를 치지 않으려면 즐겨찾기 주소 뒤에 <code>#api=https://게이트웨이주소</code>를 붙여 열어두세요.</span>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label for="modelSelect">사용 모델 (구형 2.5 이하 채팅 모델 폴백 제외)</label>
+          <select id="modelSelect"></select>
+          <input id="customModelInput" class="hidden" type="text" placeholder="예: gemini-3-flash 또는 claude-sonnet-4" />
+          <span id="modelSyncStatus" class="help-text">자동 모드에서는 사용 가능한 최신 상위 모델(0.5x 가성비 우선)로 자동 선택·폴백됩니다.</span>
+        </div>
+
+        <div class="field">
+          <label for="uploadModeSelect">음성 처리 및 서버 폐기 방식</label>
+          <select id="uploadModeSelect">
+            <option value="hybrid_auto" selected>하이브리드 자동 (브라우저 실시간 음성인식 동시 수집 + 오디오 전송 시도 후 즉시 폐기)</option>
+            <option value="speech_text_only">음성 외부 무전송 (음성은 로컬 즉시 폐기 · 브라우저 실시간 음성인식 텍스트만 API 전송)</option>
+            <option value="file_then_delete">Google File API 업로드 → 분석 직후 files.delete 자동 삭제 (Google AI Studio 전용)</option>
+            <option value="inline_first">오디오 인라인(Inline) 무저장 전송 우선 (15MB 이하 서버 파일 미생성)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="missionMemoInput">미션명 / 한 줄 메모 (선택 · 비워두어도 대화로 자동 추론)</label>
+        <input id="missionMemoInput" type="text" placeholder="예: A3-2 구현, 평가자: 나 / 동료: 홍길동 (생략 가능)" />
+      </div>
+    </section>
+
+    <!-- Step 2: Mic Recording & Chunking -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title"><span class="step-num">2</span> 내장 마이크 녹음 (1시간+ 구간 분할 · 실시간 음성인식 백업)</h2>
+        <span class="help-text">12분마다 앞 구간을 백그라운드 요약 후 음성을 즉시 폐기해 1시간 이상도 거뜬합니다</span>
+      </div>
+
+      <div class="recorder-stage">
+        <div class="recorder-metrics">
+          <div class="timer-box">
+            <span id="timerDisplay" class="timer-display">00:00:00</span>
+            <span id="recStatusBadge" class="status-badge">대기 중</span>
+          </div>
+          <div class="sub-metrics">
+            <span class="sub-metric-item">현재 구간 버퍼: <strong id="currentBufferSize">0.00 MB</strong></span>
+            <span class="sub-metric-item">다음 자동 구간 요약: <strong id="nextRotateCountdown">12:00</strong></span>
+            <span class="sub-metric-item">완료된 구간 노트: <strong id="completedSegmentCount">0개</strong></span>
+          </div>
+        </div>
+
+        <canvas id="waveformCanvas" width="960" height="68" aria-label="실시간 마이크 입력 파형"></canvas>
+
+        <div class="recorder-controls">
+          <button id="btnStartRec" class="btn-primary" type="button">● 녹음 시작</button>
+          <button id="btnPauseRec" class="btn-secondary" type="button" disabled>❚❚ 일시정지</button>
+          <button id="btnRotateChunk" class="btn-accent" type="button" disabled>구간 중간 요약 &amp; 음성 비우기</button>
+          <button id="btnStopAndGenerate" class="btn-success" type="button" disabled>■ 평가 종료 및 초안 생성</button>
+          <button id="btnImportFile" class="btn-secondary" type="button">음성 파일 불러오기(.m4a/.mp3/.webm)</button>
+          <input id="audioFileInput" type="file" accept="audio/*,.m4a,.mp3,.webm,.wav,.ogg" class="hidden" />
+        </div>
+
+        <div id="chunkStatusBox" class="chunk-status-box">
+          <div><strong>구간별 백그라운드 처리 현황</strong> (처리가 끝난 구간 음성은 즉시 폐기됩니다)</div>
+          <div id="chunkPills" class="chunk-pills"></div>
+        </div>
+
+        <div class="transcript-box">
+          <div class="transcript-header">
+            <div class="transcript-title">
+              <span>실시간 대화 대본 (Web Speech API 백업 / 직접 붙여넣기 겸용)</span>
+              <span id="speechStatusBadge" class="speech-badge">음성인식 대기</span>
+            </div>
+            <button id="btnGenerateFromTranscript" class="btn-secondary btn-sm" type="button">대본 텍스트만으로 바로 초안 생성</button>
+          </div>
+          <div id="speechInterimLine" class="interim-line"></div>
+          <textarea id="liveTranscriptTextarea" placeholder="녹음 중 브라우저가 받아적는 한국어 대화 내용이 실시간으로 표시됩니다. Claude·GPT 모델이나 '음성 외부 무전송' 모드, 또는 게이트웨이가 오디오 직접 전송을 거부할 때 이 대본이 자동으로 사용됩니다. 직접 대화록을 붙여넣고 '대본 텍스트만으로 바로 초안 생성'을 누를 수도 있습니다."></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3: Privacy & Disposal Audit Log -->
+    <section class="card">
+      <div class="card-header">
+        <h2 class="card-title"><span class="step-num">3</span> 실시간 음성 데이터 폐기 확인 및 감사 로그</h2>
+        <button id="btnPurgeAll" class="btn-danger-outline btn-sm" type="button">지금 모든 데이터(음성·노트·DB) 즉시 완전 파기</button>
+      </div>
+
+      <div class="audit-metrics">
+        <div class="audit-stat">
+          <span class="audit-stat-label">로컬 RAM 음성 잔량</span>
+          <span id="statRamBytes" class="audit-stat-value safe">0 B (비어 있음)</span>
+        </div>
+        <div class="audit-stat">
+          <span class="audit-stat-label">IndexedDB 임시 음성 잔량</span>
+          <span id="statIdbBytes" class="audit-stat-value safe">0 B (비어 있음)</span>
+        </div>
+        <div class="audit-stat">
+          <span class="audit-stat-label">구글 서버 파일 상태</span>
+          <span id="statServerFile" class="audit-stat-value safe">업로드된 파일 없음</span>
+        </div>
+        <div class="audit-stat">
+          <span class="audit-stat-label">실제 사용 모델</span>
+          <span id="statUsedModel" class="audit-stat-value">-</span>
+        </div>
+      </div>
+
+      <div id="auditLog" class="audit-log" aria-live="polite"></div>
+    </section>
+
+    <!-- Step 4: 3-Part Results -->
+    <section id="resultsSection" class="results-section">
+      <!-- Role & Refinement Controls -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title"><span class="step-num">4</span> 화자 역할 확인 및 초안 조건 조절</h2>
+          <button id="btnSwapRoles" class="btn-accent btn-sm" type="button">⇄ 평가자 ↔ 피평가자 역할 바꾸기</button>
+        </div>
+
+        <div class="role-banner">
+          <div class="role-info">
+            <div><strong>화자 A 추론:</strong> <span id="roleSpeakerA">-</span></div>
+            <div><strong>화자 B 추론:</strong> <span id="roleSpeakerB">-</span></div>
+          </div>
+          <span class="help-text">역할이 반대로 묶였으면 위 버튼을 누르세요. 이미 폐기된 음성 없이 추출된 대화 노트로 3–5초 만에 양쪽 초안을 다시 씁니다.</span>
+        </div>
+
+        <div class="refine-toolbar">
+          <div class="field">
+            <label for="toneSelect">피드백 말투</label>
+            <select id="toneSelect">
+              <option value="polite_haeyo">정중한 해요체 (기본: ~해주셔서 좋았습니다)</option>
+              <option value="formal_hapsyo">격식체 (~했습니다 / ~바랍니다)</option>
+              <option value="plain_concise">담백한 평어·개조식 요약</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="lengthSelect">피드백 분량</label>
+            <select id="lengthSelect">
+              <option value="short">짧게 (핵심 3–4문장)</option>
+              <option value="medium" selected>기본 (1–2문단, 표준)</option>
+              <option value="long">길게 (구체적 사례·개선점 상세)</option>
+            </select>
+          </div>
+          <button id="btnRegenerateDrafts" class="btn-primary" type="button">선택 포인트·조건으로 초안 다시 다듬기</button>
+        </div>
+      </div>
+
+      <!-- Part 1: Diarized Core Conversation Points -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">1단 · 화자별 핵심 대화 요약 &amp; 놓치기 쉬운 포인트</h2>
+          <span class="help-text">체크를 해제하거나 직접 포인트를 추가한 뒤 위 '다시 다듬기'를 누를 수 있습니다</span>
+        </div>
+
+        <div id="pointsList" class="points-list"></div>
+
+        <div class="input-row">
+          <select id="customPointSpeaker" style="width: 130px; flex-shrink: 0;">
+            <option value="평가자">평가자</option>
+            <option value="피평가자">피평가자</option>
+            <option value="공통">공통</option>
+          </select>
+          <select id="customPointCategory" style="width: 150px; flex-shrink: 0;">
+            <option value="칭찬/강점">칭찬/강점</option>
+            <option value="개선제안/놓친점">개선제안/놓친점</option>
+            <option value="질문/검증">질문/검증</option>
+            <option value="구현설명">구현설명</option>
+          </select>
+          <input id="customPointInput" type="text" placeholder="기억난 포인트나 추가로 반영할 내용을 적고 Enter 또는 추가 버튼 클릭" />
+          <button id="btnAddCustomPoint" class="btn-secondary" type="button">추가</button>
+        </div>
+      </div>
+
+      <!-- Part 2 & 3: Reviewer & Reviewee Drafts -->
+      <div class="grid-2">
+        <div class="draft-card">
+          <div class="draft-header">
+            <h3 class="draft-title">2단 · 평가자 → 피평가자용 피드백 초안</h3>
+            <button id="btnCopyReviewer" class="btn-primary btn-sm" type="button">클립보드 복사</button>
+          </div>
+          <textarea id="reviewerDraftTextarea" class="draft-textarea" placeholder="평가자가 피평가자에게 남길 상호 피드백 초안이 여기에 표시됩니다."></textarea>
+          <div class="draft-footer">
+            <span id="reviewerCharCount">0자 (공백 제외 0자)</span>
+            <span>평가 입력란에 붙여넣기 전 직접 다듬을 수 있습니다</span>
+          </div>
+        </div>
+
+        <div class="draft-card">
+          <div class="draft-header">
+            <h3 class="draft-title">3단 · 피평가자 → 평가자용 피드백 초안 (동료 전달용)</h3>
+            <button id="btnCopyReviewee" class="btn-success btn-sm" type="button">클립보드 복사</button>
+          </div>
+          <textarea id="revieweeDraftTextarea" class="draft-textarea" placeholder="피평가자가 평가자에게 남길 상호 피드백 초안이 여기에 표시됩니다."></textarea>
+          <div class="draft-footer">
+            <span id="revieweeCharCount">0자 (공백 제외 0자)</span>
+            <span>복사해서 맞은편 동료에게 슬랙·디스코드로 바로 공유하세요</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      // =========================================================================
+      // 1. Constants & State
+      // =========================================================================
+      const DB_NAME = "peer_feedback_temp_db";
+      const DB_VERSION = 1;
+      const STORE_CHUNKS = "active_chunks";
+      const STORE_NOTES = "extracted_notes";
+      const GATEWAY_BASE_URL_STORAGE = "peer_feedback_gateway_base_url";
+      const LEGACY_GOOGLE_KEY_STORAGE = "peer_feedback_gemini_api_key";
+      const SEGMENT_ROTATE_SECONDS = 12 * 60; // 12분 단위 자동 구간 분할
+      const CHUNK_TIMESLICE_MS = 5000; // 5초마다 IndexedDB 백업 기록
+      const INLINE_SAFE_LIMIT_BYTES = 15 * 1024 * 1024; // 15MB (Base64 시 약 20MB)
+      const AUDIO_BITRATE_BPS = 24000; // 24kbps 말소리 최적화
+
+      // Google AI Studio 직접 호출 시 2.5 이하 구형을 제외한 3.x+ 상위 모델 목록
+      const GOOGLE_STATIC_TOP_MODELS = [
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview"
+      ];
+
+      // 호환 게이트웨이 기본 지원 CHAT 모델 카탈로그 (2.5 이하 및 비-CHAT 제외)
+      const GATEWAY_MODEL_CATALOG = [
+        { id: "gemini-3-flash", label: "gemini-3-flash (Google · 가중치 0.5x · 오디오/텍스트 추천)", weight: 0.5, audioCapable: true },
+        { id: "gemini-3.1-flash-lite", label: "gemini-3.1-flash-lite (Google · 가중치 0.5x)", weight: 0.5, audioCapable: true },
+        { id: "gpt-5.4-mini", label: "gpt-5.4-mini (OpenAI · 가중치 0.5x · 대본용)", weight: 0.5, audioCapable: false },
+        { id: "claude-haiku-4", label: "claude-haiku-4 (Anthropic · 가중치 0.5x · 대본용)", weight: 0.5, audioCapable: false },
+        { id: "gpt-5-mini", label: "gpt-5-mini (OpenAI · 가중치 0.5x · 대본용)", weight: 0.5, audioCapable: false },
+        { id: "claude-sonnet-4", label: "claude-sonnet-4 (Anthropic · 가중치 1.0x · 한국어 추천)", weight: 1.0, audioCapable: false },
+        { id: "gpt-5.4", label: "gpt-5.4 (OpenAI · 가중치 1.0x · 대본용)", weight: 1.0, audioCapable: false },
+        { id: "gpt-5.3", label: "gpt-5.3 (OpenAI · 가중치 1.0x · 대본용)", weight: 1.0, audioCapable: false },
+        { id: "gemini-3.1-pro", label: "gemini-3.1-pro (Google · 가중치 1.5x · 고정밀)", weight: 1.5, audioCapable: true },
+        { id: "claude-opus-4-7", label: "claude-opus-4-7 (Anthropic · 가중치 1.5x · 대본용)", weight: 1.5, audioCapable: false },
+        { id: "claude-opus-4-6", label: "claude-opus-4-6 (Anthropic · 가중치 1.5x · 대본용)", weight: 1.5, audioCapable: false }
+      ];
+
+      const state = {
+        db: null,
+        sessionId: generateId("sess"),
+        recordingState: "idle", // idle | recording | paused | stopping
+        mediaStream: null,
+        mediaRecorder: null,
+        activeMimeType: "",
+        currentSegmentIndex: 1,
+        currentChunkSeq: 0,
+        currentRamChunks: [], // 현재 녹음 중인 구간의 Blob 조각들 (종료 시 즉시 초기화)
+        currentRamBytes: 0,
+        idbCachedBytes: 0,
+        totalActiveSeconds: 0,
+        segmentActiveSeconds: 0,
+        timerInterval: null,
+        audioCtx: null,
+        analyser: null,
+        animFrameId: null,
+        isRotating: false,
+        pendingSegmentTasks: [], // 백그라운드 구간 처리 Promise 배열
+        segmentStatuses: [], // [{ index, status, summaryCount }]
+        extractedSegmentNotes: [], // [{ segmentIndex, inferredRoles, points, segmentSummary }]
+        syncedModelsByProvider: { gateway: [], google_direct: [] },
+        serverActiveFiles: new Set(),
+        speechRecognition: null,
+        speechSupported: false,
+        speechAllowRestart: false,
+        speechCommittedSegments: {}, // { [segmentIndex]: string }
+        currentSegmentTranscript: "",
+        finalResult: null, // { inferredRoles, conversationPoints, reviewerToRevieweeDraft, revieweeToReviewerDraft }
+        isBusy: false
+      };
+
+      // =========================================================================
+      // 2. DOM Elements
+      // =========================================================================
+      const el = {
+        recoveryBanner: document.getElementById("recoveryBanner"),
+        recoveryDesc: document.getElementById("recoveryDesc"),
+        btnRecoverProcess: document.getElementById("btnRecoverProcess"),
+        btnRecoverDiscard: document.getElementById("btnRecoverDiscard"),
+        globalError: document.getElementById("globalError"),
+
+        providerSelect: document.getElementById("providerSelect"),
+        providerHelpText: document.getElementById("providerHelpText"),
+        gatewayBaseUrlField: document.getElementById("gatewayBaseUrlField"),
+        gatewayBaseUrlInput: document.getElementById("gatewayBaseUrlInput"),
+        apiKeyLabel: document.getElementById("apiKeyLabel"),
+        apiKeyInput: document.getElementById("apiKeyInput"),
+        btnToggleKey: document.getElementById("btnToggleKey"),
+        rememberKeyCheckbox: document.getElementById("rememberKeyCheckbox"),
+        btnClearKey: document.getElementById("btnClearKey"),
+        btnSyncModels: document.getElementById("btnSyncModels"),
+        modelSelect: document.getElementById("modelSelect"),
+        customModelInput: document.getElementById("customModelInput"),
+        modelSyncStatus: document.getElementById("modelSyncStatus"),
+        uploadModeSelect: document.getElementById("uploadModeSelect"),
+        missionMemoInput: document.getElementById("missionMemoInput"),
+
+        timerDisplay: document.getElementById("timerDisplay"),
+        recStatusBadge: document.getElementById("recStatusBadge"),
+        currentBufferSize: document.getElementById("currentBufferSize"),
+        nextRotateCountdown: document.getElementById("nextRotateCountdown"),
+        completedSegmentCount: document.getElementById("completedSegmentCount"),
+        waveformCanvas: document.getElementById("waveformCanvas"),
+
+        btnStartRec: document.getElementById("btnStartRec"),
+        btnPauseRec: document.getElementById("btnPauseRec"),
+        btnRotateChunk: document.getElementById("btnRotateChunk"),
+        btnStopAndGenerate: document.getElementById("btnStopAndGenerate"),
+        btnImportFile: document.getElementById("btnImportFile"),
+        audioFileInput: document.getElementById("audioFileInput"),
+        chunkStatusBox: document.getElementById("chunkStatusBox"),
+        chunkPills: document.getElementById("chunkPills"),
+        speechStatusBadge: document.getElementById("speechStatusBadge"),
+        speechInterimLine: document.getElementById("speechInterimLine"),
+        liveTranscriptTextarea: document.getElementById("liveTranscriptTextarea"),
+        btnGenerateFromTranscript: document.getElementById("btnGenerateFromTranscript"),
+
+        btnPurgeAll: document.getElementById("btnPurgeAll"),
+        statRamBytes: document.getElementById("statRamBytes"),
+        statIdbBytes: document.getElementById("statIdbBytes"),
+        statServerFile: document.getElementById("statServerFile"),
+        statUsedModel: document.getElementById("statUsedModel"),
+        auditLog: document.getElementById("auditLog"),
+
+        resultsSection: document.getElementById("resultsSection"),
+        btnSwapRoles: document.getElementById("btnSwapRoles"),
+        roleSpeakerA: document.getElementById("roleSpeakerA"),
+        roleSpeakerB: document.getElementById("roleSpeakerB"),
+        toneSelect: document.getElementById("toneSelect"),
+        lengthSelect: document.getElementById("lengthSelect"),
+        btnRegenerateDrafts: document.getElementById("btnRegenerateDrafts"),
+        pointsList: document.getElementById("pointsList"),
+        customPointSpeaker: document.getElementById("customPointSpeaker"),
+        customPointCategory: document.getElementById("customPointCategory"),
+        customPointInput: document.getElementById("customPointInput"),
+        btnAddCustomPoint: document.getElementById("btnAddCustomPoint"),
+
+        reviewerDraftTextarea: document.getElementById("reviewerDraftTextarea"),
+        revieweeDraftTextarea: document.getElementById("revieweeDraftTextarea"),
+        btnCopyReviewer: document.getElementById("btnCopyReviewer"),
+        btnCopyReviewee: document.getElementById("btnCopyReviewee"),
+        reviewerCharCount: document.getElementById("reviewerCharCount"),
+        revieweeCharCount: document.getElementById("revieweeCharCount")
+      };
+
+      // =========================================================================
+      // 3. Utility & Audit Logging
+      // =========================================================================
+      function generateId(prefix) {
+        return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      }
+
+      function formatBytes(bytes) {
+        if (!bytes || bytes <= 0) return "0 B";
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+      }
+
+      function formatDuration(sec) {
+        const s = Math.max(0, Math.floor(sec));
+        const h = String(Math.floor(s / 3600)).padStart(2, "0");
+        const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+        const rem = String(s % 60).padStart(2, "0");
+        return `${h}:${m}:${rem}`;
+      }
+
+      function formatMMSS(sec) {
+        const s = Math.max(0, Math.floor(sec));
+        const m = String(Math.floor(s / 60)).padStart(2, "0");
+        const rem = String(s % 60).padStart(2, "0");
+        return `${m}:${rem}`;
+      }
+
+      function nowTimeStr() {
+        const d = new Date();
+        return d.toTimeString().slice(0, 8);
+      }
+
+      function addAuditLog(message, level = "info") {
+        const div = document.createElement("div");
+        div.className = `log-entry ${level}`;
+        div.textContent = `[${nowTimeStr()}] ${message}`;
+        el.auditLog.appendChild(div);
+        el.auditLog.scrollTop = el.auditLog.scrollHeight;
+      }
+
+      function showError(msg) {
+        if (!msg) {
+          el.globalError.textContent = "";
+          el.globalError.classList.remove("visible");
+          return;
+        }
+        el.globalError.textContent = msg;
+        el.globalError.classList.add("visible");
+      }
+
+      function updateStorageIndicators() {
+        el.currentBufferSize.textContent = `${(state.currentRamBytes / (1024 * 1024)).toFixed(2)} MB`;
+
+        if (state.currentRamBytes === 0) {
+          el.statRamBytes.textContent = "0 B (비어 있음)";
+          el.statRamBytes.className = "audit-stat-value safe";
+        } else {
+          el.statRamBytes.textContent = `${formatBytes(state.currentRamBytes)} (녹음/처리 중)`;
+          el.statRamBytes.className = "audit-stat-value active-data";
+        }
+
+        if (state.idbCachedBytes === 0) {
+          el.statIdbBytes.textContent = "0 B (비어 있음)";
+          el.statIdbBytes.className = "audit-stat-value safe";
+        } else {
+          el.statIdbBytes.textContent = `${formatBytes(state.idbCachedBytes)} (복구 안전 버퍼)`;
+          el.statIdbBytes.className = "audit-stat-value active-data";
+        }
+
+        if (state.serverActiveFiles.size > 0) {
+          el.statServerFile.textContent = `임시 파일 ${state.serverActiveFiles.size}개 처리 중`;
+          el.statServerFile.className = "audit-stat-value active-data";
+        }
+      }
+
+      function updateStatusBadge(mode, text) {
+        el.recStatusBadge.className = `status-badge ${mode}`;
+        if (mode === "recording") {
+          el.recStatusBadge.innerHTML = `<span class="dot"></span>${escapeHtml(text)}`;
+        } else {
+          el.recStatusBadge.textContent = text;
+        }
+      }
+
+      function escapeHtml(str) {
+        return String(str ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function updateCharCount(textarea, counterEl) {
+        const text = textarea.value || "";
+        const withSpaces = text.length;
+        const withoutSpaces = text.replace(/\s+/g, "").length;
+        counterEl.textContent = `${withSpaces}자 (공백 제외 ${withoutSpaces}자)`;
+      }
+
+      // =========================================================================
+      // 4. API Key, Gateway Base URL & Provider Management
+      // =========================================================================
+      function getProvider() {
+        return el.providerSelect.value || "gateway";
+      }
+
+      function getStorageKeyForProvider(provider) {
+        return `peer_feedback_key_${provider}`;
+      }
+
+      function normalizeGatewayBaseUrl(raw) {
+        let val = (raw || "").trim();
+        if (!val) return "";
+        if (!/^https?:\/\//i.test(val)) {
+          val = `https://${val}`;
+        }
+        val = val.replace(/\/+$/, "");
+        val = val.replace(/\/v1\/(?:chat\/completions|messages|models)$/i, "");
+        val = val.replace(/\/v1$/i, "");
+        val = val.replace(/\/+$/, "");
+        return val;
+      }
+
+      function extractUrlParamFromLocation() {
+        for (const rawSource of [window.location.hash, window.location.search]) {
+          if (!rawSource) continue;
+          const stripped = rawSource.replace(/^[#?]+/, "");
+          const params = new URLSearchParams(stripped);
+          const candidate = params.get("api") || params.get("url") || params.get("base");
+          if (candidate) {
+            return normalizeGatewayBaseUrl(candidate);
+          }
+        }
+        return "";
+      }
+
+      function getGatewayBaseUrl() {
+        return normalizeGatewayBaseUrl(el.gatewayBaseUrlInput.value);
+      }
+
+      function saveGatewayBaseUrlToStorage() {
+        const clean = getGatewayBaseUrl();
+        if (!clean) {
+          sessionStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+          localStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+          return;
+        }
+        if (el.rememberKeyCheckbox.checked) {
+          localStorage.setItem(GATEWAY_BASE_URL_STORAGE, clean);
+          sessionStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+        } else {
+          sessionStorage.setItem(GATEWAY_BASE_URL_STORAGE, clean);
+          localStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+        }
+      }
+
+      function loadGatewayBaseUrl() {
+        const fromLoc = extractUrlParamFromLocation();
+        if (fromLoc) {
+          el.gatewayBaseUrlInput.value = fromLoc;
+          saveGatewayBaseUrlToStorage();
+          addAuditLog(`URL 파라미터에서 게이트웨이 Base URL을 자동 설정했습니다 (${fromLoc}).`, "info");
+          return;
+        }
+        const localUrl = localStorage.getItem(GATEWAY_BASE_URL_STORAGE);
+        const sessionUrl = sessionStorage.getItem(GATEWAY_BASE_URL_STORAGE);
+        el.gatewayBaseUrlInput.value = localUrl || sessionUrl || "";
+      }
+
+      function loadApiKeyFromStorage() {
+        const provider = getProvider();
+        const k = getStorageKeyForProvider(provider);
+        let localKey = localStorage.getItem(k);
+        let sessionKey = sessionStorage.getItem(k);
+
+        if (!localKey && !sessionKey && provider === "google_direct") {
+          localKey = localStorage.getItem(LEGACY_GOOGLE_KEY_STORAGE);
+          sessionKey = sessionStorage.getItem(LEGACY_GOOGLE_KEY_STORAGE);
+        }
+
+        if (localKey) {
+          el.apiKeyInput.value = localKey;
+          el.rememberKeyCheckbox.checked = true;
+          addAuditLog(`[${provider}] 로컬 저장소에 기억된 API 키를 불러왔습니다.`, "info");
+        } else if (sessionKey) {
+          el.apiKeyInput.value = sessionKey;
+          el.rememberKeyCheckbox.checked = false;
+        } else {
+          el.apiKeyInput.value = "";
+          el.rememberKeyCheckbox.checked = provider === "gateway" && Boolean(localStorage.getItem(GATEWAY_BASE_URL_STORAGE));
+        }
+      }
+
+      function saveApiKeyToStorage() {
+        const provider = getProvider();
+        const k = getStorageKeyForProvider(provider);
+        const val = el.apiKeyInput.value.trim();
+
+        if (!val) {
+          sessionStorage.removeItem(k);
+          localStorage.removeItem(k);
+          if (provider === "google_direct") {
+            sessionStorage.removeItem(LEGACY_GOOGLE_KEY_STORAGE);
+            localStorage.removeItem(LEGACY_GOOGLE_KEY_STORAGE);
+          }
+        } else if (el.rememberKeyCheckbox.checked) {
+          localStorage.setItem(k, val);
+          sessionStorage.removeItem(k);
+        } else {
+          sessionStorage.setItem(k, val);
+          localStorage.removeItem(k);
+        }
+
+        saveGatewayBaseUrlToStorage();
+      }
+
+      function getApiKey() {
+        return el.apiKeyInput.value.trim();
+      }
+
+      function applyProviderUiState() {
+        const provider = getProvider();
+        if (provider === "gateway") {
+          el.gatewayBaseUrlField.classList.remove("hidden");
+          el.apiKeyLabel.textContent = "게이트웨이 Virtual Key / API Key";
+          el.apiKeyInput.placeholder = "Virtual Key 입력 (기본: 탭 닫으면 자동 삭제됨)";
+          el.providerHelpText.textContent = "OpenAI/Anthropic 호환 게이트웨이의 Base URL과 Virtual Key를 사용합니다. gemini-3-flash, claude-haiku-4, gpt-5.4-mini는 토큰 차감 가중치 0.5배입니다.";
+          el.customModelInput.placeholder = "예: gemini-3-flash, claude-sonnet-4, gpt-5.4";
+          el.modelSyncStatus.textContent = "자동 모드에서는 게이트웨이 0.5x 가성비 상위 모델(gemini-3-flash 등)을 우선 선택·폴백합니다.";
+        } else {
+          el.gatewayBaseUrlField.classList.add("hidden");
+          el.apiKeyLabel.textContent = "Google Gemini API Key (Google AI Studio 무료 키)";
+          el.apiKeyInput.placeholder = "AIza... 입력 (기본: 탭 닫으면 자동 삭제됨)";
+          el.providerHelpText.textContent = "Google AI Studio 무료 API 키를 사용합니다. File API 업로드 직후 files.delete 자동 호출 및 3.x+ 상위 모델 폴백을 지원합니다.";
+          el.customModelInput.placeholder = "예: gemini-3.8-flash 또는 gemini-4-argon";
+          el.modelSyncStatus.textContent = "API 키를 입력하고 동기화하면 내 계정에서 사용 가능한 3.x+ 모델만 자동 정렬됩니다.";
+        }
+        loadApiKeyFromStorage();
+        loadGatewayBaseUrl();
+        renderModelSelectOptions();
+        el.customModelInput.classList.add("hidden");
+      }
+
+      // =========================================================================
+      // 5. Dual-Provider Model Filtering, Sync & Fallback (No <= 2.5 Chat Models)
+      // =========================================================================
+      function parseGeminiVersion(modelId) {
+        const clean = modelId.replace(/^models\//, "");
+        const match = clean.match(/^gemini-(\d+)(?:\.(\d+))?/i);
+        if (!match) return null;
+        const major = parseInt(match[1], 10);
+        const minor = match[2] !== undefined ? parseInt(match[2], 10) : 0;
+        return { major, minor, id: clean };
+      }
+
+      function isEligibleTopModel(modelObj) {
+        const rawName = (modelObj.name || "").replace(/^models\//, "");
+        const methods = modelObj.supportedGenerationMethods || [];
+        if (!methods.includes("generateContent")) return false;
+
+        if (/tts|image|imagen|veo|embedding|aqa|robotics|computer-use|bisect|native-audio|live/i.test(rawName)) {
+          return false;
+        }
+
+        const ver = parseGeminiVersion(rawName);
+        if (!ver) return false;
+        // 구형 2.5 이하 배제, 3.0 이상 상위 모델만 허용
+        return ver.major >= 3;
+      }
+
+      function rankTopModel(id) {
+        const ver = parseGeminiVersion(id) || { major: 0, minor: 0 };
+        const lower = id.toLowerCase();
+        let tier = 0;
+        if (lower.includes("flash") && !lower.includes("lite")) tier = 3;
+        else if (lower.includes("pro")) tier = 2;
+        else if (lower.includes("lite")) tier = 1;
+
+        const isStable = !/(preview|exp|experimental)/i.test(lower) ? 1 : 0;
+        return [ver.major, ver.minor, tier, isStable];
+      }
+
+      function compareModelIdsDesc(a, b) {
+        const ra = rankTopModel(a);
+        const rb = rankTopModel(b);
+        for (let i = 0; i < ra.length; i++) {
+          if (ra[i] !== rb[i]) return rb[i] - ra[i];
+        }
+        return a.localeCompare(b);
+      }
+
+      function isGatewayChatModelAllowed(id) {
+        if (!id) return false;
+        if (/tts|image|imagen|veo|sora|embedding|whisper|moderation|realtime|audio/i.test(id)) {
+          return false;
+        }
+        const gemVer = parseGeminiVersion(id);
+        if (gemVer && gemVer.major < 3) return false;
+        if (/^claude-3/i.test(id) || /^gpt-[34]/i.test(id)) return false;
+        return true;
+      }
+
+      function isGatewayAudioCapableModel(id) {
+        const found = GATEWAY_MODEL_CATALOG.find((m) => m.id === id);
+        if (found) return !!found.audioCapable;
+        return /^gemini-/i.test(id);
+      }
+
+      function getSelectedModelRaw() {
+        const val = el.modelSelect.value;
+        if (val === "__custom__") {
+          return el.customModelInput.value.trim().replace(/^models\//, "");
+        }
+        return val;
+      }
+
+      function renderModelSelectOptions() {
+        const provider = getProvider();
+        const prevVal = el.modelSelect.value;
+        const synced = state.syncedModelsByProvider[provider] || [];
+        el.modelSelect.innerHTML = "";
+
+        if (provider === "gateway") {
+          const autoOpt = document.createElement("option");
+          autoOpt.value = "auto";
+          autoOpt.textContent = "자동 (게이트웨이 0.5x 가성비 상위 모델 자동 선택 및 폴백: gemini-3-flash 우선)";
+          el.modelSelect.appendChild(autoOpt);
+
+          const catalogMap = new Map(GATEWAY_MODEL_CATALOG.map((m) => [m.id, m]));
+          const listIds = synced.length > 0
+            ? Array.from(new Set([...GATEWAY_MODEL_CATALOG.map((m) => m.id).filter((id) => synced.includes(id)), ...synced]))
+            : GATEWAY_MODEL_CATALOG.map((m) => m.id);
+
+          listIds.forEach((id) => {
+            const info = catalogMap.get(id);
+            const opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = info ? info.label : id;
+            el.modelSelect.appendChild(opt);
+          });
+        } else {
+          const list = synced.length > 0 ? synced : GOOGLE_STATIC_TOP_MODELS;
+          const autoOpt = document.createElement("option");
+          autoOpt.value = "auto";
+          autoOpt.textContent = `자동 (내 API 키의 최신 3.x+ 상위 모델 자동 선택 및 폴백: 1순위 ${list[0]})`;
+          el.modelSelect.appendChild(autoOpt);
+
+          list.forEach((m) => {
+            const opt = document.createElement("option");
+            opt.value = m;
+            opt.textContent = m;
+            el.modelSelect.appendChild(opt);
+          });
+        }
+
+        const customOpt = document.createElement("option");
+        customOpt.value = "__custom__";
+        customOpt.textContent = "직접 모델 ID 입력...";
+        el.modelSelect.appendChild(customOpt);
+
+        const exists = Array.from(el.modelSelect.options).some((o) => o.value === prevVal);
+        el.modelSelect.value = exists ? prevVal : "auto";
+      }
+
+      function isNetworkOrCorsError(err) {
+        if (!err) return false;
+        if (err instanceof TypeError) return true;
+        return /Failed to fetch|Load failed|NetworkError|CORS/i.test(err.message || "");
+      }
+
+      async function fetchAvailableModels(silent = false) {
+        const provider = getProvider();
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          if (!silent) showError(`모델 목록을 동기화하려면 먼저 ${provider === "gateway" ? "게이트웨이 Virtual Key" : "Gemini API 키"}를 입력하세요.`);
+          return [];
+        }
+
+        if (provider === "gateway" && !getGatewayBaseUrl()) {
+          if (!silent) showError("모델 목록을 동기화하려면 먼저 게이트웨이 API Base URL을 입력하세요.");
+          return [];
+        }
+
+        try {
+          if (!silent) el.modelSyncStatus.textContent = "사용 가능 모델 목록 조회 중...";
+
+          if (provider === "gateway") {
+            const baseUrl = getGatewayBaseUrl();
+            const res = await fetch(`${baseUrl}/v1/models`, {
+              method: "GET",
+              headers: { "Authorization": `Bearer ${apiKey}` }
+            });
+            if (!res.ok) {
+              const errText = await res.text();
+              throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+            }
+            const data = await res.json();
+            const rawIds = (data.data || data.models || []).map((m) => (m.id || m.name || "").replace(/^models\//, "")).filter(Boolean);
+            const filtered = Array.from(new Set(rawIds.filter(isGatewayChatModelAllowed)));
+
+            const catalogOrder = GATEWAY_MODEL_CATALOG.map((m) => m.id);
+            filtered.sort((a, b) => {
+              const ia = catalogOrder.indexOf(a);
+              const ib = catalogOrder.indexOf(b);
+              if (ia !== -1 && ib !== -1) return ia - ib;
+              if (ia !== -1) return -1;
+              if (ib !== -1) return 1;
+              return a.localeCompare(b);
+            });
+
+            state.syncedModelsByProvider.gateway = filtered;
+            renderModelSelectOptions();
+            el.modelSyncStatus.textContent = filtered.length > 0
+              ? `게이트웨이 동기화 완료: 상위 CHAT 모델 ${filtered.length}개 확인됨`
+              : "필터 조건에 맞는 모델이 목록에 없어 기본 게이트웨이 카탈로그를 사용합니다.";
+            if (filtered.length > 0) {
+              addAuditLog(`게이트웨이 API 사용 가능 상위 CHAT 모델 ${filtered.length}개 동기화 완료`, "ok");
+            }
+            return filtered;
+          }
+
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+          }
+          const data = await res.json();
+          const filtered = (data.models || [])
+            .filter(isEligibleTopModel)
+            .map((m) => m.name.replace(/^models\//, ""))
+            .sort(compareModelIdsDesc);
+
+          const unique = Array.from(new Set(filtered));
+          state.syncedModelsByProvider.google_direct = unique;
+          renderModelSelectOptions();
+
+          if (unique.length > 0) {
+            el.modelSyncStatus.textContent = `동기화 완료: 3.x+ 상위 모델 ${unique.length}개 확인됨 (최우선: ${unique[0]})`;
+            addAuditLog(`Google API 3.x+ 활성 모델 ${unique.length}개 동기화 완료 (1순위: ${unique[0]})`, "ok");
+          } else {
+            el.modelSyncStatus.textContent = "3.x+ 조건에 맞는 모델이 목록에 없어 기본 상위 후보 목록을 사용합니다.";
+            addAuditLog("models.list에서 3.x+ 필터 결과가 비어 기본 3.x+ 후보 목록 유지", "warn");
+          }
+          return unique;
+        } catch (err) {
+          const corsHint = provider === "gateway" && isNetworkOrCorsError(err)
+            ? " (file:// 환경 CORS 제한일 수 있음 — 로컬 HTTP 서버 또는 Google 직접 호출 이용 가능)"
+            : "";
+          el.modelSyncStatus.textContent = `모델 목록 조회 실패 (기본 목록으로 진행): ${err.message}${corsHint}`;
+          if (!silent) {
+            addAuditLog(`모델 목록 동기화 실패: ${err.message}${corsHint}`, "warn");
+          }
+          return [];
+        }
+      }
+
+      async function buildModelCandidates(requireAudio = false) {
+        const provider = getProvider();
+        const selected = el.modelSelect.value;
+        const synced = state.syncedModelsByProvider[provider] || [];
+
+        if (provider === "gateway") {
+          const staticIds = GATEWAY_MODEL_CATALOG.map((m) => m.id);
+          let pool = Array.from(new Set([...staticIds, ...synced]));
+          if (requireAudio) {
+            pool = pool.filter(isGatewayAudioCapableModel);
+          }
+
+          if (selected === "__custom__") {
+            const custom = el.customModelInput.value.trim().replace(/^models\//, "");
+            if (!custom) throw new Error("직접 입력할 모델 ID를 적어주세요.");
+            return Array.from(new Set([custom, ...pool]));
+          }
+          if (selected === "auto") {
+            return pool;
+          }
+          if (requireAudio && !isGatewayAudioCapableModel(selected)) {
+            const err = new Error(`선택한 모델(${selected})은 텍스트 전용 모델입니다.`);
+            err.isTextOnlyModel = true;
+            throw err;
+          }
+          return [selected, ...pool.filter((m) => m !== selected)];
+        }
+
+        // google_direct
+        if (selected === "__custom__") {
+          const custom = el.customModelInput.value.trim().replace(/^models\//, "");
+          if (!custom) throw new Error("직접 입력할 모델 ID를 적어주세요.");
+          const rest = [...synced, ...GOOGLE_STATIC_TOP_MODELS].filter((m) => m !== custom);
+          return Array.from(new Set([custom, ...rest]));
+        }
+
+        if (selected === "auto" && synced.length === 0) {
+          await fetchAvailableModels(true);
+        }
+
+        const pool = Array.from(new Set([...(state.syncedModelsByProvider.google_direct || []), ...GOOGLE_STATIC_TOP_MODELS]));
+        if (selected === "auto") return pool;
+        return [selected, ...pool.filter((m) => m !== selected)];
+      }
+
+      function mimeToAudioFormat(cleanMime) {
+        const sub = (cleanMime || "audio/webm").split("/")[1] || "webm";
+        if (sub === "mpeg") return "mp3";
+        if (sub === "x-wav") return "wav";
+        return sub;
+      }
+
+      async function callGatewayOpenAiEndpoint(baseUrl, apiKey, modelId, promptText, audioPayload, useJsonMode = true) {
+        const content = audioPayload
+          ? [
+              { type: "text", text: promptText },
+              {
+                type: "input_audio",
+                input_audio: {
+                  data: audioPayload.base64,
+                  format: mimeToAudioFormat(audioPayload.cleanMime)
+                }
+              }
+            ]
+          : promptText;
+
+        const bodyObj = {
+          model: modelId,
+          temperature: 0.3,
+          messages: [{ role: "user", content }]
+        };
+        if (useJsonMode) {
+          bodyObj.response_format = { type: "json_object" };
+        }
+
+        const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(bodyObj)
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          const msgContent = json?.choices?.[0]?.message?.content;
+          const textPart = Array.isArray(msgContent)
+            ? msgContent.map((c) => c.text || "").join("")
+            : (msgContent || "");
+          if (!textPart) {
+            throw new Error(`응답 텍스트 없음 (${json?.choices?.[0]?.finish_reason || "empty"})`);
+          }
+          return textPart;
+        }
+
+        const errText = await res.text();
+        if (res.status === 400 && useJsonMode && /response_format/i.test(errText)) {
+          return await callGatewayOpenAiEndpoint(baseUrl, apiKey, modelId, promptText, audioPayload, false);
+        }
+
+        const err = new Error(`HTTP ${res.status}: ${errText.slice(0, 260)}`);
+        err.status = res.status;
+        if (audioPayload && [400, 415, 422, 501].includes(res.status)) {
+          err.isAudioRejected = true;
+        }
+        throw err;
+      }
+
+      async function callGatewayAnthropicEndpoint(baseUrl, apiKey, modelId, promptText) {
+        const res = await fetch(`${baseUrl}/v1/messages`, {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: modelId,
+            max_tokens: 4096,
+            temperature: 0.3,
+            messages: [{ role: "user", content: promptText }]
+          })
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          const textPart = Array.isArray(json?.content)
+            ? json.content.map((c) => c.text || "").join("")
+            : "";
+          if (!textPart) {
+            throw new Error(`Anthropic 응답 텍스트 없음 (${json?.stop_reason || "empty"})`);
+          }
+          return textPart;
+        }
+
+        const errText = await res.text();
+        const err = new Error(`HTTP ${res.status}: ${errText.slice(0, 240)}`);
+        err.status = res.status;
+        throw err;
+      }
+
+      async function callGoogleDirectSingleModel(apiKey, modelId, contents, generationConfig = {}) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents,
+            generationConfig: {
+              temperature: 0.3,
+              responseMimeType: "application/json",
+              ...generationConfig
+            }
+          })
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          const textPart = json?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
+          if (!textPart) {
+            const blockReason = json?.promptFeedback?.blockReason || json?.candidates?.[0]?.finishReason || "빈 응답";
+            throw new Error(`응답 텍스트 없음 (${blockReason})`);
+          }
+          return textPart;
+        }
+
+        const errBody = await res.text();
+        const err = new Error(`HTTP ${res.status}: ${errBody.slice(0, 240)}`);
+        err.status = res.status;
+        throw err;
+      }
+
+      async function callLLMWithFallback({ promptText, audioPayload = null, generationConfig = {} }) {
+        const provider = getProvider();
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          throw new Error(`${provider === "gateway" ? "게이트웨이 Virtual Key" : "Gemini API 키"}를 먼저 입력해 주세요.`);
+        }
+
+        const gatewayBaseUrl = provider === "gateway" ? getGatewayBaseUrl() : "";
+        if (provider === "gateway" && !gatewayBaseUrl) {
+          throw new Error("게이트웨이 API Base URL을 입력해 주세요. (또는 북마크 주소 뒤에 #api=https://... 를 붙여 열 수 있습니다.)");
+        }
+
+        const candidates = await buildModelCandidates(Boolean(audioPayload));
+        const errors = [];
+
+        for (let i = 0; i < candidates.length; i++) {
+          const modelId = candidates[i];
+          try {
+            let textPart = "";
+
+            if (provider === "gateway") {
+              if (!audioPayload && /^claude-/i.test(modelId)) {
+                try {
+                  textPart = await callGatewayAnthropicEndpoint(gatewayBaseUrl, apiKey, modelId, promptText);
+                } catch (anthErr) {
+                  if (anthErr.status === 401 || anthErr.status === 403) throw anthErr;
+                  // CORS 또는 /v1/messages 미호환 시 /v1/chat/completions 프로토콜로 폴백
+                  textPart = await callGatewayOpenAiEndpoint(gatewayBaseUrl, apiKey, modelId, promptText, null);
+                }
+              } else {
+                textPart = await callGatewayOpenAiEndpoint(gatewayBaseUrl, apiKey, modelId, promptText, audioPayload);
+              }
+              el.statUsedModel.textContent = `${modelId} (게이트웨이)`;
+            } else {
+              const parts = [];
+              if (audioPayload) {
+                if (audioPayload.fileUri) {
+                  parts.push({ file_data: { mime_type: audioPayload.cleanMime, file_uri: audioPayload.fileUri } });
+                } else if (audioPayload.base64) {
+                  parts.push({ inline_data: { mime_type: audioPayload.cleanMime, data: audioPayload.base64 } });
+                }
+              }
+              parts.push({ text: promptText });
+              textPart = await callGoogleDirectSingleModel(apiKey, modelId, [{ role: "user", parts }], generationConfig);
+              el.statUsedModel.textContent = `${modelId} (Google)`;
+            }
+
+            return { modelId, text: textPart };
+          } catch (err) {
+            if (err.status === 401 || err.status === 403) {
+              throw new Error(`API 키 인증 오류 (HTTP ${err.status}): 키가 유효한지 확인하세요. (${err.message})`);
+            }
+
+            if (err.isAudioRejected) {
+              throw err;
+            }
+
+            if (isNetworkOrCorsError(err)) {
+              if (provider === "gateway") {
+                throw new Error(
+                  `게이트웨이 API(${gatewayBaseUrl}) 브라우저 연결이 CORS 또는 네트워크로 차단되었습니다.\n` +
+                  `해결 방법:\n` +
+                  `1) HTML 파일을 file:// 로 직접 열지 말고 GitHub Pages(https://) 또는 로컬 HTTP 서버(python3 -m http.server 8765)로 열거나,\n` +
+                  `2) 상단 [API 제공자]를 'Google AI Studio 직접 호출'로 전환해 사용해 주세요.\n(원인: ${err.message})`
+                );
+              }
+            }
+
+            if ([404, 429, 500, 503].includes(err.status)) {
+              const reason = `HTTP ${err.status}`;
+              errors.push(`${modelId}: ${reason}`);
+              addAuditLog(`${modelId} 실패(${reason}) → 다음 상위 모델로 폴백 시도`, "warn");
+              continue;
+            }
+
+            errors.push(`${modelId}: ${err.message}`);
+            if (i === candidates.length - 1) {
+              throw new Error(`모델 호출에 모두 실패했습니다.\n- ${errors.join("\n- ")}`);
+            }
+          }
+        }
+
+        throw new Error(`사용 가능한 상위 모델을 찾지 못했습니다.\n- ${errors.join("\n- ")}`);
+      }
+
+      // =========================================================================
+      // 6. IndexedDB Crash-Safe Temp Buffer & Full Disposal
+      // =========================================================================
+      function openDb() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_CHUNKS)) {
+              const chunkStore = db.createObjectStore(STORE_CHUNKS, { keyPath: "id" });
+              chunkStore.createIndex("segmentIndex", "segmentIndex", { unique: false });
+            }
+            if (!db.objectStoreNames.contains(STORE_NOTES)) {
+              db.createObjectStore(STORE_NOTES, { keyPath: "segmentIndex" });
+            }
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      function idbRequest(req) {
+        return new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      async function saveActiveChunkToIdb(segmentIndex, chunkSeq, mime, blob) {
+        if (!state.db) return;
+        const tx = state.db.transaction(STORE_CHUNKS, "readwrite");
+        const store = tx.objectStore(STORE_CHUNKS);
+        await idbRequest(store.put({
+          id: `${state.sessionId}_seg${segmentIndex}_seq${chunkSeq}`,
+          sessionId: state.sessionId,
+          segmentIndex,
+          chunkSeq,
+          mime,
+          blob,
+          size: blob.size,
+          createdAt: Date.now()
+        }));
+        state.idbCachedBytes += blob.size;
+        updateStorageIndicators();
+      }
+
+      async function replaceSegmentChunksWithFullBlobInIdb(segmentIndex, mime, fullBlob) {
+        if (!state.db) return;
+        const tx = state.db.transaction(STORE_CHUNKS, "readwrite");
+        const store = tx.objectStore(STORE_CHUNKS);
+        const all = await idbRequest(store.getAll());
+        for (const item of all) {
+          if (item.segmentIndex === segmentIndex) {
+            await idbRequest(store.delete(item.id));
+          }
+        }
+        await idbRequest(store.put({
+          id: `${state.sessionId}_seg${segmentIndex}_complete`,
+          sessionId: state.sessionId,
+          segmentIndex,
+          chunkSeq: 0,
+          mime,
+          blob: fullBlob,
+          size: fullBlob.size,
+          isCompleteSegment: true,
+          createdAt: Date.now()
+        }));
+        await recalcIdbBytes();
+      }
+
+      async function deleteSegmentChunksFromIdb(segmentIndex) {
+        if (!state.db) return;
+        const tx = state.db.transaction(STORE_CHUNKS, "readwrite");
+        const store = tx.objectStore(STORE_CHUNKS);
+        const all = await idbRequest(store.getAll());
+        for (const item of all) {
+          if (item.segmentIndex === segmentIndex) {
+            await idbRequest(store.delete(item.id));
+          }
+        }
+        await recalcIdbBytes();
+      }
+
+      async function saveExtractedNoteToIdb(noteObj) {
+        if (!state.db) return;
+        const tx = state.db.transaction(STORE_NOTES, "readwrite");
+        await idbRequest(tx.objectStore(STORE_NOTES).put(noteObj));
+      }
+
+      async function getAllIdbRecords(storeName) {
+        if (!state.db) return [];
+        const tx = state.db.transaction(storeName, "readonly");
+        return await idbRequest(tx.objectStore(storeName).getAll());
+      }
+
+      async function clearIdbStore(storeName) {
+        if (!state.db) return;
+        const tx = state.db.transaction(storeName, "readwrite");
+        await idbRequest(tx.objectStore(storeName).clear());
+        await recalcIdbBytes();
+      }
+
+      async function recalcIdbBytes() {
+        const chunks = await getAllIdbRecords(STORE_CHUNKS);
+        state.idbCachedBytes = chunks.reduce((acc, c) => acc + (c.size || (c.blob ? c.blob.size : 0)), 0);
+        updateStorageIndicators();
+      }
+
+      async function checkCrashRecoveryOnLoad() {
+        const chunks = await getAllIdbRecords(STORE_CHUNKS);
+        const notes = await getAllIdbRecords(STORE_NOTES);
+        await recalcIdbBytes();
+
+        if (chunks.length === 0 && notes.length === 0) return;
+
+        const totalChunkBytes = chunks.reduce((acc, c) => acc + (c.size || (c.blob ? c.blob.size : 0)), 0);
+        const segCount = new Set(chunks.map((c) => c.segmentIndex)).size;
+        el.recoveryDesc.textContent =
+          `미처리 음성 버퍼 ${segCount}개 구간 (${formatBytes(totalChunkBytes)}) 및 추출된 구간 노트 ${notes.length}개가 남아 있습니다. 안전하게 복구해 초안을 만든 뒤 음성을 즉시 폐기할 수 있습니다.`;
+        el.recoveryBanner.classList.add("visible");
+        addAuditLog(`이전 비정상 종료 버퍼 감지: 음성 ${formatBytes(totalChunkBytes)}, 노트 ${notes.length}개`, "warn");
+      }
+
+      // =========================================================================
+      // 7. Audio Transmission & Immediate Server Disposal (File API DELETE + Inline)
+      // =========================================================================
+      function normalizeAudioMimeType(mime) {
+        const base = (mime || "").split(";")[0].trim().toLowerCase();
+        if (!base) return "audio/webm";
+        if (base === "audio/x-m4a" || base === "audio/m4a") return "audio/mp4";
+        if (base === "audio/x-wav") return "audio/wav";
+        return base;
+      }
+
+      function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result;
+            const commaIdx = typeof dataUrl === "string" ? dataUrl.indexOf(",") : -1;
+            if (commaIdx === -1) {
+              reject(new Error("Base64 인코딩 변환 실패"));
+              return;
+            }
+            resolve(dataUrl.slice(commaIdx + 1));
+          };
+          reader.onerror = () => reject(reader.error || new Error("파일 읽기 오류"));
+          reader.readAsDataURL(blob);
+        });
+      }
+
+      async function uploadAudioMultipartToGeminiFileApi(blob, cleanMime, displayName) {
+        const apiKey = getApiKey();
+        const boundary = "peer_feedback_boundary_" + Math.random().toString(36).slice(2);
+        const metaPart = JSON.stringify({ file: { display_name: displayName } });
+        const bodyBlob = new Blob([
+          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,
+          metaPart,
+          `\r\n--${boundary}\r\nContent-Type: ${cleanMime}\r\n\r\n`,
+          blob,
+          `\r\n--${boundary}--\r\n`
+        ]);
+
+        const multipartUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart&key=${encodeURIComponent(apiKey)}`;
+        const res = await fetch(multipartUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": `multipart/related; boundary=${boundary}`
+          },
+          body: bodyBlob
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Multipart File API 업로드 실패 (HTTP ${res.status}): ${errText.slice(0, 160)}`);
+        }
+        return await res.json();
+      }
+
+      async function uploadAudioToGeminiFileApi(blob, cleanMime, displayName) {
+        const apiKey = getApiKey();
+        const startUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`;
+
+        const startRes = await fetch(startUrl, {
+          method: "POST",
+          headers: {
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": String(blob.size),
+            "X-Goog-Upload-Header-Content-Type": cleanMime,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ file: { display_name: displayName } })
+        });
+
+        if (!startRes.ok) {
+          const errText = await startRes.text();
+          throw new Error(`File API 세션 시작 실패 (HTTP ${startRes.status}): ${errText.slice(0, 160)}`);
+        }
+
+        let uploadJson;
+        const uploadUrl = startRes.headers.get("x-goog-upload-url") || startRes.headers.get("X-Goog-Upload-URL");
+        if (!uploadUrl) {
+          // 브라우저 CORS가 x-goog-upload-url 노출을 막는 경우 multipart 단일 요청으로 업로드 시도
+          uploadJson = await uploadAudioMultipartToGeminiFileApi(blob, cleanMime, displayName);
+        } else {
+          const uploadRes = await fetch(uploadUrl, {
+            method: "POST",
+            headers: {
+              "Content-Length": String(blob.size),
+              "X-Goog-Upload-Offset": "0",
+              "X-Goog-Upload-Command": "upload, finalize"
+            },
+            body: blob
+          });
+
+          if (!uploadRes.ok) {
+            const errText = await uploadRes.text();
+            throw new Error(`File API 바이트 업로드 실패 (HTTP ${uploadRes.status}): ${errText.slice(0, 160)}`);
+          }
+          uploadJson = await uploadRes.json();
+        }
+        let fileInfo = uploadJson.file || uploadJson;
+        if (!fileInfo || !fileInfo.name || !fileInfo.uri) {
+          throw new Error("File API 응답에 file.name 또는 file.uri가 없습니다.");
+        }
+
+        state.serverActiveFiles.add(fileInfo.name);
+        updateStorageIndicators();
+        addAuditLog(`구글 서버 File API 임시 업로드 완료 (${fileInfo.name}, ${formatBytes(blob.size)})`, "info");
+
+        // 오디오 파일이 PROCESSING 상태면 ACTIVE 될 때까지 짧게 대기
+        let polls = 0;
+        while (fileInfo.state === "PROCESSING" && polls < 15) {
+          await new Promise((r) => setTimeout(r, 1000));
+          polls++;
+          const checkRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileInfo.name}?key=${encodeURIComponent(apiKey)}`);
+          if (checkRes.ok) {
+            const checkJson = await checkRes.json();
+            fileInfo = checkJson.file || checkJson;
+          }
+        }
+
+        return fileInfo;
+      }
+
+      async function deleteGeminiServerFile(fileName) {
+        const apiKey = getApiKey();
+        if (!fileName || !apiKey) return;
+        const delUrl = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(apiKey)}`;
+        try {
+          const res = await fetch(delUrl, { method: "DELETE" });
+          state.serverActiveFiles.delete(fileName);
+          if (res.ok) {
+            el.statServerFile.textContent = `즉시 삭제 완료 (HTTP ${res.status})`;
+            el.statServerFile.className = "audit-stat-value safe";
+            addAuditLog(`구글 서버 임시 음성 파일 영구 삭제 완료 (${fileName}, HTTP ${res.status})`, "ok");
+          } else {
+            const txt = await res.text();
+            el.statServerFile.textContent = `삭제 응답 확인 필요 (HTTP ${res.status})`;
+            el.statServerFile.className = "audit-stat-value active-data";
+            addAuditLog(`구글 서버 파일 삭제 응답 HTTP ${res.status} (${fileName}): ${txt.slice(0, 120)}`, "warn");
+          }
+        } catch (err) {
+          state.serverActiveFiles.delete(fileName);
+          addAuditLog(`구글 서버 파일 삭제 요청 중 오류 (${fileName}): ${err.message}`, "err");
+        } finally {
+          updateStorageIndicators();
+        }
+      }
+
+      async function sendAudioOrTranscriptAndDispose({ blob, rawMime, promptTextAudio, promptTextTranscript, label, transcriptText }) {
+        const provider = getProvider();
+        const mode = el.uploadModeSelect.value;
+        const cleanTranscript = (transcriptText || "").trim();
+
+        // 1) 음성 외부 무전송 모드: 오디오는 1바이트도 서버로 보내지 않고 실시간 대본만 전송
+        if (mode === "speech_text_only") {
+          blob = null;
+          if (!cleanTranscript) {
+            throw new Error("음성 외부 무전송 모드인데 수집된 실시간 대화 대본이 비어 있습니다. 아래 대본 입력란에 내용을 입력하거나 '하이브리드 자동' 모드를 사용하세요.");
+          }
+          el.statServerFile.textContent = "음성 외부 무전송 (대본만 전송)";
+          el.statServerFile.className = "audit-stat-value safe";
+          addAuditLog(`${label}: 음성 파일 미전송 — 브라우저 음성인식 대본(${cleanTranscript.length}자)만 전송`, "ok");
+          return await callLLMWithFallback({ promptText: promptTextTranscript, audioPayload: null });
+        }
+
+        // 2) 호환 게이트웨이 경로: gemini-3-* 인라인 오디오 시도 -> 텍스트 전용 모델이거나 게이트웨이 거부 시 대본으로 자동 전환
+        if (provider === "gateway") {
+          const selectedModel = getSelectedModelRaw();
+          const isExplicitTextOnly = selectedModel && selectedModel !== "auto" && !isGatewayAudioCapableModel(selectedModel);
+
+          if (isExplicitTextOnly) {
+            blob = null;
+            if (!cleanTranscript) {
+              throw new Error(`선택한 모델(${selectedModel})은 텍스트 전용입니다. 모델 선택을 '자동' 또는 'gemini-3-flash'로 바꾸거나 아래 대본 칸에 대화 내용을 입력해 주세요.`);
+            }
+            el.statServerFile.textContent = "음성 미전송 (텍스트 모델 · 대본 분석)";
+            el.statServerFile.className = "audit-stat-value safe";
+            addAuditLog(`${label}: ${selectedModel}은 텍스트 전용 모델이므로 음성을 즉시 폐기하고 대본(${cleanTranscript.length}자)으로 분석`, "info");
+            return await callLLMWithFallback({ promptText: promptTextTranscript, audioPayload: null });
+          }
+
+          if (!blob) {
+            if (!cleanTranscript) throw new Error("분석할 음성이나 대본이 없습니다.");
+            return await callLLMWithFallback({ promptText: promptTextTranscript, audioPayload: null });
+          }
+
+          const cleanMime = normalizeAudioMimeType(rawMime);
+          if (blob.size > INLINE_SAFE_LIMIT_BYTES) {
+            if (cleanTranscript) {
+              blob = null;
+              addAuditLog(`${label}: 15MB 초과로 게이트웨이 인라인 한도를 넘어 실시간 대본(${cleanTranscript.length}자)으로 자동 전환`, "warn");
+              return await callLLMWithFallback({ promptText: promptTextTranscript, audioPayload: null });
+            }
+            throw new Error(`게이트웨이 API는 별도 파일 업로드(/files)가 없어 15MB 이하 오디오만 직접 전송할 수 있습니다. (현재 ${formatBytes(blob.size)}) 'Google AI Studio 직접 호출'로 전환해 처리하세요.`);
+          }
+
+          let b64 = await blobToBase64(blob);
+          try {
+            el.statServerFile.textContent = "파일 미생성 (게이트웨이 Inline 전송)";
+            el.statServerFile.className = "audit-stat-value safe";
+            addAuditLog(`${label}: 게이트웨이에 오디오 인라인 전송 시도 (${formatBytes(blob.size)}, ${cleanMime})`, "info");
+            return await callLLMWithFallback({
+              promptText: promptTextAudio,
+              audioPayload: { base64: b64, cleanMime }
+            });
+          } catch (err) {
+            if (err.isAudioRejected || err.isTextOnlyModel) {
+              if (cleanTranscript) {
+                el.statServerFile.textContent = "오디오 미지원 · 대본 텍스트로 전환";
+                el.statServerFile.className = "audit-stat-value safe";
+                addAuditLog(
+                  `${label}: 게이트웨이가 오디오 입력을 받지 않아(${err.message.slice(0, 60)}) 로컬 음성을 폐기하고 실시간 대본(${cleanTranscript.length}자)으로 자동 전환합니다.`,
+                  "warn"
+                );
+                return await callLLMWithFallback({ promptText: promptTextTranscript, audioPayload: null });
+              }
+              throw new Error(
+                `게이트웨이가 오디오 직접 입력을 지원하지 않았으며(${err.message}), 백업 음성인식 대본도 비어 있습니다.\n` +
+                `[API 제공자]를 'Google AI Studio 직접 호출'로 바꾸거나 아래 대본 칸에 내용을 입력해 생성하세요.`
+              );
+            }
+            throw err;
+          } finally {
+            b64 = null;
+            blob = null;
+          }
+        }
+
+        // 3) Google AI Studio 직접 호출 경로 (File API + files.delete 자동 호출 / Inline 폴백)
+        const cleanMime = normalizeAudioMimeType(rawMime);
+        let uploadedFile = null;
+        let useInline = false;
+
+        if (mode === "inline_first" && blob.size <= INLINE_SAFE_LIMIT_BYTES) {
+          useInline = true;
+        } else {
+          try {
+            uploadedFile = await uploadAudioToGeminiFileApi(blob, cleanMime, `peer_feedback_${label}_${Date.now()}`);
+          } catch (uploadErr) {
+            if (blob.size <= INLINE_SAFE_LIMIT_BYTES) {
+              useInline = true;
+              addAuditLog(
+                `File API 업로드 불가(${uploadErr.message.slice(0, 60)}) → 인라인(Inline) 무저장 전송으로 자동 전환 (서버 파일 미생성)`,
+                "warn"
+              );
+            } else {
+              throw uploadErr;
+            }
+          }
+        }
+
+        try {
+          let audioPayload;
+          if (useInline) {
+            let b64 = await blobToBase64(blob);
+            audioPayload = { base64: b64, cleanMime };
+            b64 = null;
+            el.statServerFile.textContent = "파일 미생성 (Inline 무저장 전송)";
+            el.statServerFile.className = "audit-stat-value safe";
+            addAuditLog(`${label}: Inline 1회성 무저장 전송 중 (${formatBytes(blob.size)}, ${cleanMime})`, "info");
+          } else {
+            audioPayload = { fileUri: uploadedFile.uri, cleanMime };
+          }
+
+          const result = await callLLMWithFallback({ promptText: promptTextAudio, audioPayload });
+          audioPayload = null;
+          return result;
+        } finally {
+          blob = null;
+          if (uploadedFile && uploadedFile.name) {
+            await deleteGeminiServerFile(uploadedFile.name);
+          }
+        }
+      }
+
+      function parseGeminiJson(rawText) {
+        let cleaned = (rawText || "").trim();
+        if (cleaned.startsWith("```")) {
+          cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+        }
+        return JSON.parse(cleaned);
+      }
+
+      // =========================================================================
+      // 8. Prompts (Korean, Diarization, 3-Part Structure — Audio & Transcript)
+      // =========================================================================
+      function getToneInstruction(tone) {
+        if (tone === "formal_hapsyo") {
+          return "정중한 격식체('~했습니다', '~해주셨습니다', '~보완하면 좋겠습니다')로 작성하세요.";
+        }
+        if (tone === "plain_concise") {
+          return "담백하고 핵심만 짚는 평어·요약체('~함이 좋았음', '~부분 보완 필요')로 작성하세요.";
+        }
+        return "따뜻하면서도 구체적인 정중한 해요체('~해주셔서 좋았어요', '~부분을 더 다듬으면 좋겠습니다')로 작성하세요.";
+      }
+
+      function getLengthInstruction(length) {
+        if (length === "short") {
+          return "각 초안은 3–4문장 내외(약 150–250자)로 핵심만 간결하게 작성하세요.";
+        }
+        if (length === "long") {
+          return "각 초안은 대화 속 구체적 사례·질문·기술 키워드를 충실히 담아 2–3문단(약 450–700자)으로 상세하게 작성하세요.";
+        }
+        return "각 초안은 동료평가 입력란에 바로 붙여넣기 좋은 1–2문단(약 250–450자) 분량으로 작성하세요.";
+      }
+
+      function buildSingleShotAudioPrompt(supplementalTranscript = "") {
+        const memo = el.missionMemoInput.value.trim();
+        const toneDesc = getToneInstruction(el.toneSelect.value);
+        const lenDesc = getLengthInstruction(el.lengthSelect.value);
+        const extraNote = supplementalTranscript && supplementalTranscript.trim()
+          ? `\n[보조 실시간 음성인식 대본(참고용 — 실제 오디오를 우선하되 기술 용어 파악에 참고)]\n${supplementalTranscript.trim()}\n`
+          : "";
+
+        return `당신은 소프트웨어 학습 과정의 동료평가 대화 분석 도우미입니다.
+첨부된 음성 대화는 두 명의 학습자(평가자/리뷰어와 피평가자/리뷰이)가 과제 결과물을 두고 나눈 동료평가 대화입니다.
+
+[사용자 사전 메모]
+${memo ? memo : "(별도 메모 없음 — 대화 내용과 문맥으로 미션과 화자 역할을 추론하세요.)"}${extraNote}
+[수행 지시]
+1. 목소리 특징과 대화 역할(질문·코드 검증·채점 기준 확인 쪽이 '평가자', 자신의 구현 의도·트러블슈팅을 설명하고 답변하는 쪽이 '피평가자')을 구분해 화자를 분리하세요.
+2. 단순 추상적 감상이 아니라, 대화에서 실제로 언급된 코드/기술/설계/질문/개선점과 "피드백 적을 때 미처 떠올리지 못해 빠뜨리기 쉬운 세부 사항"까지 놓치지 말고 포인트로 추출하세요.
+3. 아래 JSON 스키마로만 정확히 응답하세요.
+   - reviewerToRevieweeDraft: 평가자가 피평가자에게 작성해 줄 상호 피드백 초안 (강점·잘한 점 + 구체적 개선 제안 포함)
+   - revieweeToReviewerDraft: 피평가자가 평가자에게 작성해 줄 상호 피드백 초안 (질문·리뷰 태도·도움이 된 인사이트 감사 포함)
+   - 말투 규칙: ${toneDesc}
+   - 분량 규칙: ${lenDesc}
+
+[출력 JSON 스키마]
+{
+  "inferredRoles": {
+    "speakerA": "예: 평가자 (질문과 예외 케이스 검증을 주도)",
+    "speakerB": "예: 피평가자 (구현 구조와 에러 처리 과정을 설명)"
+  },
+  "conversationPoints": [
+    {
+      "id": "p1",
+      "speaker": "평가자" | "피평가자" | "공통",
+      "category": "질문/검증" | "구현설명" | "칭찬/강점" | "개선제안/놓친점",
+      "summary": "구체적인 대화 핵심 내용 1문장"
+    }
+  ],
+  "reviewerToRevieweeDraft": "평가자 -> 피평가자 상호 피드백 줄글 초안",
+  "revieweeToReviewerDraft": "피평가자 -> 평가자 상호 피드백 줄글 초안"
+}`;
+      }
+
+      function buildSingleShotTranscriptPrompt(transcriptText) {
+        const memo = el.missionMemoInput.value.trim();
+        const toneDesc = getToneInstruction(el.toneSelect.value);
+        const lenDesc = getLengthInstruction(el.lengthSelect.value);
+
+        return `당신은 소프트웨어 학습 과정의 동료평가 대화 분석 도우미입니다.
+아래는 두 명의 학습자(평가자/리뷰어와 피평가자/리뷰이)가 과제 결과물을 두고 나눈 대화를 브라우저 실시간 음성인식(또는 사용자 메모)으로 받아적은 대본입니다.
+음성인식 특성상 화자 구분 표시가 없고 띄어쓰기·동음이의어·개발 용어 오탈자가 있을 수 있으므로 문맥으로 자연스럽게 보정해 해석하세요.
+
+[사용자 사전 메모]
+${memo ? memo : "(별도 메모 없음 — 대화 내용과 문맥으로 미션과 화자 역할을 추론하세요.)"}
+
+[대화 대본]
+${transcriptText}
+
+[수행 지시]
+1. 문맥상 질문·코드 검증·채점 기준 확인·개선 제안을 하는 쪽을 '평가자', 자신의 구현 의도·트러블슈팅·답변을 설명하는 쪽을 '피평가자'로 구분해 화자를 분리하세요.
+2. 대화에서 언급된 구체적인 기술/설계/질문/개선점과 "피드백 적을 때 미처 떠올리지 못해 빠뜨리기 쉬운 세부 사항"을 포인트로 추출하세요. 대본에 없는 내용은 지어내지 마세요.
+3. 아래 JSON 스키마로만 정확히 응답하세요.
+   - 말투 규칙: ${toneDesc}
+   - 분량 규칙: ${lenDesc}
+
+[출력 JSON 스키마]
+{
+  "inferredRoles": {
+    "speakerA": "예: 평가자 (질문과 예외 케이스 검증을 주도)",
+    "speakerB": "예: 피평가자 (구현 구조와 에러 처리 과정을 설명)"
+  },
+  "conversationPoints": [
+    {
+      "id": "p1",
+      "speaker": "평가자" | "피평가자" | "공통",
+      "category": "질문/검증" | "구현설명" | "칭찬/강점" | "개선제안/놓친점",
+      "summary": "구체적인 대화 핵심 내용 1문장"
+    }
+  ],
+  "reviewerToRevieweeDraft": "평가자 -> 피평가자 상호 피드백 줄글 초안",
+  "revieweeToReviewerDraft": "피평가자 -> 평가자 상호 피드백 줄글 초안"
+}`;
+      }
+
+      function buildSegmentExtractPrompt(segmentIndex, previousRoleHint, supplementalTranscript = "") {
+        const memo = el.missionMemoInput.value.trim();
+        const extraNote = supplementalTranscript && supplementalTranscript.trim()
+          ? `\n[이 구간의 보조 실시간 음성인식 대본]\n${supplementalTranscript.trim()}\n`
+          : "";
+
+        return `당신은 소프트웨어 학습 과정의 동료평가 대화 중간 구간 분석 도우미입니다.
+이 음성은 긴 동료평가 대화의 [제${segmentIndex}구간]입니다.
+
+[사용자 사전 메모]
+${memo ? memo : "(별도 메모 없음)"}
+
+[이전 구간 화자 역할 단서]
+${previousRoleHint ? previousRoleHint : "(첫 번째 구간입니다. 질문·검증을 주도하는 쪽을 '평가자', 구현·답변을 설명하는 쪽을 '피평가자'로 추론하세요.)"}${extraNote}
+[수행 지시]
+1. 이전 구간의 화자 역할 일관성을 유지하면서 이 구간 오디오에서 오간 핵심 대화 포인트를 빠짐없이 추출하세요.
+2. 칭찬, 구체적인 질문, 구현 설명, 개선 제안 및 나중에 피드백을 쓸 때 놓치기 쉬운 기술 디테일을 포함하세요.
+3. 반드시 아래 JSON 형식으로만 응답하세요.
+
+{
+  "inferredRoles": {
+    "speakerA": "화자 A 역할 및 특징 요약",
+    "speakerB": "화자 B 역할 및 특징 요약"
+  },
+  "points": [
+    {
+      "speaker": "평가자" | "피평가자" | "공통",
+      "category": "질문/검증" | "구현설명" | "칭찬/강점" | "개선제안/놓친점",
+      "summary": "구체적인 대화 핵심 내용 1문장"
+    }
+  ],
+  "segmentSummary": "이 구간 대화 요약 2–3문장"
+}`;
+      }
+
+      function buildSegmentTranscriptPrompt(segmentIndex, previousRoleHint, transcriptText) {
+        const memo = el.missionMemoInput.value.trim();
+        return `당신은 소프트웨어 학습 과정의 동료평가 대화 중간 구간 분석 도우미입니다.
+아래는 긴 동료평가 대화 중 [제${segmentIndex}구간]의 실시간 음성인식 대본입니다. 오탈자와 개발 용어 동음이의어는 문맥으로 보정해 해석하세요.
+
+[사용자 사전 메모]
+${memo ? memo : "(별도 메모 없음)"}
+
+[이전 구간 화자 역할 단서]
+${previousRoleHint ? previousRoleHint : "(첫 번째 구간입니다. 질문·검증을 주도하는 쪽을 '평가자', 구현·답변을 설명하는 쪽을 '피평가자'로 추론하세요.)"}
+
+[구간 대본]
+${transcriptText}
+
+[수행 지시]
+1. 이전 구간의 화자 역할 일관성을 유지하면서 이 구간 대화에서 오간 핵심 포인트를 빠짐없이 추출하세요.
+2. 반드시 아래 JSON 형식으로만 응답하세요.
+
+{
+  "inferredRoles": {
+    "speakerA": "화자 A 역할 및 특징 요약",
+    "speakerB": "화자 B 역할 및 특징 요약"
+  },
+  "points": [
+    {
+      "speaker": "평가자" | "피평가자" | "공통",
+      "category": "질문/검증" | "구현설명" | "칭찬/강점" | "개선제안/놓친점",
+      "summary": "구체적인 대화 핵심 내용 1문장"
+    }
+  ],
+  "segmentSummary": "이 구간 대화 요약 2–3문장"
+}`;
+      }
+
+      function buildSynthesizeFromNotesPrompt(notesArray) {
+        const memo = el.missionMemoInput.value.trim();
+        const toneDesc = getToneInstruction(el.toneSelect.value);
+        const lenDesc = getLengthInstruction(el.lengthSelect.value);
+
+        return `당신은 소프트웨어 학습 과정의 동료평가 상호 피드백 작성 전문가입니다.
+아래는 장시간 동료평가 대화를 구간별로 나누어 추출하고 음성은 이미 폐기한 뒤 남은 텍스트 대화 노트입니다.
+
+[사용자 사전 메모]
+${memo ? memo : "(없음)"}
+
+[구간별 추출 노트 JSON]
+${JSON.stringify(notesArray, null, 2)}
+
+[수행 지시]
+1. 전 구간에 걸쳐 중복되는 포인트를 깔끔하게 합치되, 놓치기 쉬운 기술적 디테일은 보존하여 conversationPoints를 정리하세요.
+2. 이를 바탕으로 평가자 입장과 피평가자 입장의 상호 피드백 초안을 각각 작성하세요.
+   - 말투 규칙: ${toneDesc}
+   - 분량 규칙: ${lenDesc}
+
+[출력 JSON 스키마]
+{
+  "inferredRoles": {
+    "speakerA": "화자 A 역할 추론 종합",
+    "speakerB": "화자 B 역할 추론 종합"
+  },
+  "conversationPoints": [
+    {
+      "id": "p1",
+      "speaker": "평가자" | "피평가자" | "공통",
+      "category": "질문/검증" | "구현설명" | "칭찬/강점" | "개선제안/놓친점",
+      "summary": "핵심 내용"
+    }
+  ],
+  "reviewerToRevieweeDraft": "평가자 -> 피평가자 상호 피드백 초안",
+  "revieweeToReviewerDraft": "피평가자 -> 평가자 상호 피드백 초안"
+}`;
+      }
+
+      function buildRefineFromPointsPrompt(activePoints, inferredRoles) {
+        const memo = el.missionMemoInput.value.trim();
+        const toneDesc = getToneInstruction(el.toneSelect.value);
+        const lenDesc = getLengthInstruction(el.lengthSelect.value);
+
+        return `당신은 동료평가 상호 피드백 편집기입니다.
+사용자가 확정한 화자 역할과 체크된 핵심 대화 포인트를 바탕으로 양쪽의 피드백 초안을 다시 작성하세요.
+
+[사전 메모]
+${memo ? memo : "(없음)"}
+
+[확정된 화자 역할]
+${JSON.stringify(inferredRoles)}
+
+[반영할 핵심 대화 포인트 목록]
+${JSON.stringify(activePoints, null, 2)}
+
+[작성 규칙]
+- 말투: ${toneDesc}
+- 분량: ${lenDesc}
+- 위에 나열된 포인트만 근거로 삼아 자연스러운 줄글로 엮고, 사실에 없는 내용을 지어내지 마세요.
+- 아래 JSON으로만 응답하세요.
+
+{
+  "reviewerToRevieweeDraft": "평가자 -> 피평가자 상호 피드백 초안",
+  "revieweeToReviewerDraft": "피평가자 -> 평가자 상호 피드백 초안"
+}`;
+      }
+
+      // =========================================================================
+      // 9. Recording, Waveform & 12-min Seamless Chunk Rotation
+      // =========================================================================
+      function getSupportedMimeType() {
+        const candidates = [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/mp4",
+          "audio/ogg;codecs=opus"
+        ];
+        if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+        for (const type of candidates) {
+          if (MediaRecorder.isTypeSupported(type)) return type;
+        }
+        return "";
+      }
+
+      function createMediaRecorderForStream(stream, mimeType) {
+        const attempts = [];
+        if (mimeType) {
+          attempts.push({ mimeType, audioBitsPerSecond: AUDIO_BITRATE_BPS });
+          attempts.push({ mimeType });
+        }
+        attempts.push({ audioBitsPerSecond: AUDIO_BITRATE_BPS });
+        attempts.push({});
+
+        for (const opts of attempts) {
+          try {
+            return Object.keys(opts).length > 0 ? new MediaRecorder(stream, opts) : new MediaRecorder(stream);
+          } catch (_) {
+            // Try next fallback options
+          }
+        }
+        throw new Error("이 브라우저에서 MediaRecorder를 시작할 수 없습니다.");
+      }
+
+      function startWaveform(stream) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+
+        state.audioCtx = new AudioCtx();
+        if (state.audioCtx.state === "suspended") {
+          state.audioCtx.resume().catch(() => {});
+        }
+        const source = state.audioCtx.createMediaStreamSource(stream);
+        state.analyser = state.audioCtx.createAnalyser();
+        state.analyser.fftSize = 64;
+        source.connect(state.analyser);
+
+        const canvas = el.waveformCanvas;
+        const ctx = canvas.getContext("2d");
+        const bufferLength = state.analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        function draw() {
+          state.animFrameId = requestAnimationFrame(draw);
+          ctx.fillStyle = "#0f172a";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          if (state.recordingState !== "recording") {
+            ctx.fillStyle = "#334155";
+            ctx.fillRect(0, canvas.height / 2 - 1, canvas.width, 2);
+            return;
+          }
+
+          state.analyser.getByteFrequencyData(dataArray);
+          const barWidth = (canvas.width / bufferLength) - 3;
+          let x = 2;
+          for (let i = 0; i < bufferLength; i++) {
+            const val = dataArray[i] / 255;
+            const barHeight = Math.max(3, val * (canvas.height - 12));
+            const y = (canvas.height - barHeight) / 2;
+            ctx.fillStyle = val > 0.65 ? "#60a5fa" : val > 0.25 ? "#38bdf8" : "#475569";
+            ctx.fillRect(x, y, barWidth, barHeight);
+            x += barWidth + 3;
+          }
+        }
+        draw();
+      }
+
+      function stopWaveform() {
+        if (state.animFrameId) {
+          cancelAnimationFrame(state.animFrameId);
+          state.animFrameId = null;
+        }
+        if (state.audioCtx) {
+          state.audioCtx.close().catch(() => {});
+          state.audioCtx = null;
+          state.analyser = null;
+        }
+        const ctx = el.waveformCanvas.getContext("2d");
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 0, el.waveformCanvas.width, el.waveformCanvas.height);
+      }
+
+      function renderChunkPills() {
+        if (state.segmentStatuses.length === 0) {
+          el.chunkStatusBox.classList.remove("visible");
+          el.chunkPills.innerHTML = "";
+          return;
+        }
+        el.chunkStatusBox.classList.add("visible");
+        el.chunkPills.innerHTML = "";
+        for (const s of state.segmentStatuses) {
+          const span = document.createElement("span");
+          span.className = `chunk-pill ${s.status}`;
+          if (s.status === "processing") {
+            span.textContent = `구간 #${s.index}: 요약 추출 & 음성 삭제 중...`;
+          } else if (s.status === "done") {
+            span.textContent = `구간 #${s.index}: 포인트 ${s.summaryCount}개 추출 · 음성 폐기 완료`;
+          } else {
+            span.textContent = `구간 #${s.index}: 처리 오류 (버퍼 유지됨)`;
+          }
+          el.chunkPills.appendChild(span);
+        }
+      }
+
+      function attachRecorderAndStart(segmentIndex) {
+        return new Promise((resolveStart) => {
+          const recorder = createMediaRecorderForStream(state.mediaStream, state.activeMimeType);
+          state.mediaRecorder = recorder;
+          const detectedMime = recorder.mimeType || state.activeMimeType || "audio/webm";
+          state.activeMimeType = detectedMime;
+
+          state.currentRamChunks = [];
+          state.currentRamBytes = 0;
+          state.currentChunkSeq = 0;
+          updateStorageIndicators();
+
+          recorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              const seq = state.currentChunkSeq++;
+              state.currentRamChunks.push(event.data);
+              state.currentRamBytes += event.data.size;
+              updateStorageIndicators();
+              saveActiveChunkToIdb(segmentIndex, seq, detectedMime, event.data).catch((e) => {
+                addAuditLog(`IndexedDB 임시 저장 경고: ${e.message}`, "warn");
+              });
+            }
+          };
+
+          recorder.start(CHUNK_TIMESLICE_MS);
+          resolveStart(recorder);
+        });
+      }
+
+      function stopCurrentRecorderAndCollectBlob() {
+        return new Promise((resolve) => {
+          const recorder = state.mediaRecorder;
+          if (!recorder || recorder.state === "inactive") {
+            const blob = state.currentRamChunks.length > 0
+              ? new Blob(state.currentRamChunks, { type: state.activeMimeType || "audio/webm" })
+              : null;
+            const mime = state.activeMimeType || "audio/webm";
+            state.currentRamChunks = [];
+            state.currentRamBytes = 0;
+            updateStorageIndicators();
+            resolve({ blob, mime });
+            return;
+          }
+
+          const capturedMime = recorder.mimeType || state.activeMimeType || "audio/webm";
+          recorder.onstop = () => {
+            const blob = state.currentRamChunks.length > 0
+              ? new Blob(state.currentRamChunks, { type: capturedMime })
+              : null;
+            // 즉시 RAM 청크 배열 참조 비우기
+            state.currentRamChunks.length = 0;
+            state.currentRamChunks = [];
+            state.currentRamBytes = 0;
+            updateStorageIndicators();
+            resolve({ blob, mime: capturedMime });
+          };
+          recorder.stop();
+        });
+      }
+
+      // =========================================================================
+      // 9-B. Browser Real-time Speech Recognition (Web Speech API Backup)
+      // =========================================================================
+      function setSpeechBadge(mode, text) {
+        el.speechStatusBadge.className = `speech-badge ${mode}`;
+        el.speechStatusBadge.textContent = text;
+      }
+
+      function startSpeechRecognition() {
+        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRec) {
+          state.speechSupported = false;
+          setSpeechBadge("unsupported", "브라우저 음성인식 미지원 (오디오 녹음만 진행)");
+          addAuditLog("이 브라우저는 Web Speech API를 지원하지 않아 오디오 녹음만 수행합니다.", "warn");
+          return;
+        }
+
+        state.speechSupported = true;
+        state.speechAllowRestart = true;
+        state.lastInterimTranscript = "";
+
+        if (state.speechRecognition) {
+          try { state.speechRecognition.abort(); } catch (_) {}
+          state.speechRecognition = null;
+        }
+
+        const rec = new SpeechRec();
+        rec.lang = "ko-KR";
+        rec.continuous = true;
+        rec.interimResults = true;
+
+        rec.onstart = () => {
+          setSpeechBadge("active", "실시간 한국어 인식 중");
+        };
+
+        rec.onresult = (event) => {
+          let interim = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const res = event.results[i];
+            const txt = (res[0] && res[0].transcript) ? res[0].transcript.trim() : "";
+            if (!txt) continue;
+            if (res.isFinal) {
+              state.currentSegmentTranscript = state.currentSegmentTranscript
+                ? `${state.currentSegmentTranscript}\n${txt}`
+                : txt;
+              const prevBox = el.liveTranscriptTextarea.value.trim();
+              el.liveTranscriptTextarea.value = prevBox ? `${prevBox}\n${txt}` : txt;
+              el.liveTranscriptTextarea.scrollTop = el.liveTranscriptTextarea.scrollHeight;
+            } else {
+              interim = interim ? `${interim} ${txt}` : txt;
+            }
+          }
+          state.lastInterimTranscript = interim;
+          el.speechInterimLine.textContent = interim ? `인식 중: ${interim}` : "";
+        };
+
+        rec.onerror = (event) => {
+          const errCode = event.error || "unknown";
+          if (errCode === "no-speech" || errCode === "aborted") {
+            return;
+          }
+          if (errCode === "not-allowed" || errCode === "service-not-allowed") {
+            state.speechAllowRestart = false;
+            setSpeechBadge("unsupported", `음성인식 제한됨 (${errCode})`);
+            addAuditLog(`Web Speech API 사용 불가(${errCode}) — 오디오 녹음은 계속 진행됩니다.`, "warn");
+            return;
+          }
+          addAuditLog(`실시간 음성인식 일시 경고(${errCode}) — 오디오 녹음 정상 유지`, "warn");
+        };
+
+        rec.onend = () => {
+          el.speechInterimLine.textContent = "";
+          if (state.speechAllowRestart && state.recordingState === "recording") {
+            setTimeout(() => {
+              if (state.speechAllowRestart && state.recordingState === "recording") {
+                try { rec.start(); } catch (_) {}
+              }
+            }, 250);
+          } else if (state.recordingState === "paused") {
+            setSpeechBadge("", "음성인식 일시정지");
+          } else {
+            setSpeechBadge("", "음성인식 대기");
+          }
+        };
+
+        state.speechRecognition = rec;
+        try {
+          rec.start();
+        } catch (err) {
+          setSpeechBadge("unsupported", "음성인식 시작 실패 (오디오만 진행)");
+          addAuditLog(`Web Speech API 시작 실패: ${err.message}`, "warn");
+        }
+      }
+
+      function stopSpeechRecognition(flushInterim = true) {
+        state.speechAllowRestart = false;
+        if (flushInterim && state.lastInterimTranscript) {
+          const tail = state.lastInterimTranscript.trim();
+          if (tail) {
+            state.currentSegmentTranscript = state.currentSegmentTranscript
+              ? `${state.currentSegmentTranscript}\n${tail}`
+              : tail;
+            const prevBox = el.liveTranscriptTextarea.value.trim();
+            el.liveTranscriptTextarea.value = prevBox ? `${prevBox}\n${tail}` : tail;
+          }
+        }
+        state.lastInterimTranscript = "";
+        el.speechInterimLine.textContent = "";
+
+        if (state.speechRecognition) {
+          try { state.speechRecognition.stop(); } catch (_) {}
+          state.speechRecognition = null;
+        }
+        setSpeechBadge("", "음성인식 대기");
+      }
+
+      function consumeCurrentSegmentTranscript(segmentIndex) {
+        const text = (state.currentSegmentTranscript || "").trim();
+        state.speechCommittedSegments[segmentIndex] = text;
+        state.currentSegmentTranscript = "";
+        return text;
+      }
+
+      function clearLiveTranscriptUi() {
+        state.currentSegmentTranscript = "";
+        state.lastInterimTranscript = "";
+        state.speechCommittedSegments = {};
+        el.speechInterimLine.textContent = "";
+        el.liveTranscriptTextarea.value = "";
+      }
+
+      async function processSegmentInBackground(segmentIndex, blob, mime, segmentTranscript = "") {
+        const mode = el.uploadModeSelect.value;
+        const cleanTranscript = (segmentTranscript || "").trim();
+
+        if ((!blob || blob.size < 1024) && !cleanTranscript) {
+          await deleteSegmentChunksFromIdb(segmentIndex);
+          return;
+        }
+
+        if (blob && blob.size >= 1024 && mode !== "speech_text_only") {
+          // IndexedDB에서도 해당 구간의 5초 조각들을 헤더가 온전한 단일 Blob으로 교체 (충돌 복구 안전)
+          await replaceSegmentChunksWithFullBlobInIdb(segmentIndex, mime, blob);
+        } else {
+          await deleteSegmentChunksFromIdb(segmentIndex);
+        }
+
+        const statusEntry = { index: segmentIndex, status: "processing", summaryCount: 0 };
+        state.segmentStatuses.push(statusEntry);
+        renderChunkPills();
+
+        try {
+          const prevNote = state.extractedSegmentNotes[state.extractedSegmentNotes.length - 1];
+          const prevRoleHint = prevNote && prevNote.inferredRoles
+            ? `화자 A: ${prevNote.inferredRoles.speakerA} / 화자 B: ${prevNote.inferredRoles.speakerB}`
+            : "";
+
+          const promptAudio = buildSegmentExtractPrompt(segmentIndex, prevRoleHint, cleanTranscript);
+          const promptTranscript = buildSegmentTranscriptPrompt(segmentIndex, prevRoleHint, cleanTranscript);
+
+          const { text } = await sendAudioOrTranscriptAndDispose({
+            blob,
+            rawMime: mime,
+            promptTextAudio: promptAudio,
+            promptTextTranscript: promptTranscript,
+            label: `segment_${segmentIndex}`,
+            transcriptText: cleanTranscript
+          });
+          const parsed = parseGeminiJson(text);
+
+          const noteRecord = {
+            segmentIndex,
+            inferredRoles: parsed.inferredRoles || { speakerA: "평가자", speakerB: "피평가자" },
+            points: Array.isArray(parsed.points) ? parsed.points : [],
+            segmentSummary: parsed.segmentSummary || ""
+          };
+
+          state.extractedSegmentNotes.push(noteRecord);
+          await saveExtractedNoteToIdb(noteRecord);
+          await deleteSegmentChunksFromIdb(segmentIndex);
+
+          statusEntry.status = "done";
+          statusEntry.summaryCount = noteRecord.points.length;
+          el.completedSegmentCount.textContent = `${state.extractedSegmentNotes.length}개`;
+          renderChunkPills();
+          addAuditLog(`구간 #${segmentIndex} 요약 추출 완료 (${noteRecord.points.length}개 포인트) 및 로컬 음성 즉시 폐기 완료`, "ok");
+        } catch (err) {
+          statusEntry.status = "error";
+          renderChunkPills();
+          addAuditLog(`구간 #${segmentIndex} 백그라운드 추출 실패 (안전 복구용 IndexedDB 버퍼는 유지됨): ${err.message}`, "err");
+          throw err;
+        } finally {
+          blob = null;
+        }
+      }
+
+      async function rotateSegmentNow(isManual = false) {
+        if (state.isRotating || state.recordingState === "idle") return;
+        state.isRotating = true;
+        try {
+          const finishingIndex = state.currentSegmentIndex;
+          const wasPaused = state.recordingState === "paused";
+          const segTranscript = consumeCurrentSegmentTranscript(finishingIndex);
+          const { blob, mime } = await stopCurrentRecorderAndCollectBlob();
+
+          state.currentSegmentIndex += 1;
+          state.segmentActiveSeconds = 0;
+          el.nextRotateCountdown.textContent = formatMMSS(SEGMENT_ROTATE_SECONDS);
+
+          await attachRecorderAndStart(state.currentSegmentIndex);
+          if (wasPaused && state.mediaRecorder && state.mediaRecorder.state === "recording") {
+            state.mediaRecorder.pause();
+          }
+
+          addAuditLog(
+            `${isManual ? "수동 구간 분할" : "12분 자동 구간 분할"}: 구간 #${finishingIndex} 확정(${formatBytes(blob ? blob.size : 0)}) → 구간 #${state.currentSegmentIndex} 연속 녹음 중`,
+            "info"
+          );
+
+          const task = processSegmentInBackground(finishingIndex, blob, mime, segTranscript);
+          state.pendingSegmentTasks.push(task);
+        } finally {
+          state.isRotating = false;
+        }
+      }
+
+      async function startRecording() {
+        showError("");
+        if (!getApiKey()) {
+          showError(`녹음을 시작하기 전에 상단에 ${getProvider() === "gateway" ? "게이트웨이 Virtual Key" : "Gemini API 키"}를 입력해 주세요.`);
+          el.apiKeyInput.focus();
+          return;
+        }
+        if (getProvider() === "gateway" && !getGatewayBaseUrl()) {
+          showError("녹음을 시작하기 전에 상단에 게이트웨이 API Base URL을 입력해 주세요.");
+          el.gatewayBaseUrlInput.focus();
+          return;
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          });
+
+          state.mediaStream = stream;
+          state.activeMimeType = getSupportedMimeType();
+          state.sessionId = generateId("sess");
+          state.currentSegmentIndex = 1;
+          state.totalActiveSeconds = 0;
+          state.segmentActiveSeconds = 0;
+          state.segmentStatuses = [];
+          state.extractedSegmentNotes = [];
+          state.pendingSegmentTasks = [];
+          clearLiveTranscriptUi();
+          el.recoveryBanner.classList.remove("visible");
+          await clearIdbStore(STORE_CHUNKS);
+          await clearIdbStore(STORE_NOTES);
+          renderChunkPills();
+
+          await attachRecorderAndStart(state.currentSegmentIndex);
+          startWaveform(stream);
+
+          state.recordingState = "recording";
+          startSpeechRecognition();
+          updateRecordingButtons();
+          updateStatusBadge("recording", "녹음 중");
+          el.timerDisplay.textContent = "00:00:00";
+          el.nextRotateCountdown.textContent = formatMMSS(SEGMENT_ROTATE_SECONDS);
+          el.completedSegmentCount.textContent = "0개";
+
+          addAuditLog(
+            `브라우저 내장 마이크 녹음 시작 (${getProvider()} · 모드: ${el.uploadModeSelect.value} · 코덱: ${state.activeMimeType || "브라우저 기본"})`,
+            "info"
+          );
+
+          if (state.timerInterval) clearInterval(state.timerInterval);
+          state.timerInterval = setInterval(() => {
+            if (state.recordingState === "recording") {
+              state.totalActiveSeconds += 1;
+              state.segmentActiveSeconds += 1;
+              el.timerDisplay.textContent = formatDuration(state.totalActiveSeconds);
+              const remain = Math.max(0, SEGMENT_ROTATE_SECONDS - state.segmentActiveSeconds);
+              el.nextRotateCountdown.textContent = formatMMSS(remain);
+
+              if (state.segmentActiveSeconds >= SEGMENT_ROTATE_SECONDS && !state.isRotating) {
+                rotateSegmentNow(false).catch((e) => showError(`구간 분할 중 오류: ${e.message}`));
+              }
+            }
+          }, 1000);
+        } catch (err) {
+          showError(`마이크 접근 또는 녹음 시작 실패: ${err.message}\nmacOS '시스템 설정 → 개인정보 보호 및 보안 → 마이크'에서 브라우저 권한을 확인하세요.`);
+          addAuditLog(`마이크 시작 실패: ${err.message}`, "err");
+        }
+      }
+
+      function togglePauseRecording() {
+        if (!state.mediaRecorder) return;
+        if (state.recordingState === "recording") {
+          state.mediaRecorder.pause();
+          state.recordingState = "paused";
+          stopSpeechRecognition(true);
+          el.btnPauseRec.textContent = "▶ 녹음 재개";
+          updateStatusBadge("paused", "일시정지");
+          addAuditLog("녹음 일시정지", "info");
+        } else if (state.recordingState === "paused") {
+          state.mediaRecorder.resume();
+          state.recordingState = "recording";
+          startSpeechRecognition();
+          el.btnPauseRec.textContent = "❚❚ 일시정지";
+          updateStatusBadge("recording", "녹음 중");
+          addAuditLog("녹음 재개", "info");
+        }
+      }
+
+      function stopMicStreamAndTimers() {
+        stopSpeechRecognition(true);
+        if (state.timerInterval) {
+          clearInterval(state.timerInterval);
+          state.timerInterval = null;
+        }
+        stopWaveform();
+        if (state.mediaStream) {
+          state.mediaStream.getTracks().forEach((t) => t.stop());
+          state.mediaStream = null;
+        }
+      }
+
+      async function stopAndGenerateAll() {
+        showError("");
+        if (!getApiKey()) {
+          showError("API 키가 없습니다. 키를 입력한 뒤 다시 시도하세요.");
+          return;
+        }
+
+        state.recordingState = "stopping";
+        state.isBusy = true;
+        updateRecordingButtons();
+        updateStatusBadge("processing", "분석 및 음성 자동 폐기 중...");
+
+        try {
+          const finalSegIdx = state.currentSegmentIndex;
+          const { blob, mime } = await stopCurrentRecorderAndCollectBlob();
+          stopMicStreamAndTimers();
+
+          const finalSegTranscript = consumeCurrentSegmentTranscript(finalSegIdx);
+          const fullTextareaTranscript = el.liveTranscriptTextarea.value.trim();
+
+          // Case 1: 12분 이하 단일 구간 -> 1회 호출로 바로 3단 생성
+          if (state.extractedSegmentNotes.length === 0 && state.pendingSegmentTasks.length === 0) {
+            const effectiveTranscript = fullTextareaTranscript || finalSegTranscript;
+            if ((!blob || blob.size < 1024) && !effectiveTranscript) {
+              throw new Error("녹음된 음성과 인식된 대본이 모두 비어 있습니다.");
+            }
+            await generateFromSingleAudioBlob(blob, mime, finalSegIdx, effectiveTranscript);
+          } else {
+            // Case 2: 다중 구간(12분 이상 또는 수동 분할)
+            if ((blob && blob.size >= 1024) || finalSegTranscript) {
+              const lastTask = processSegmentInBackground(finalSegIdx, blob, mime, finalSegTranscript);
+              state.pendingSegmentTasks.push(lastTask);
+            } else {
+              await deleteSegmentChunksFromIdb(finalSegIdx);
+            }
+
+            addAuditLog("모든 구간의 백그라운드 요약 및 서버·로컬 음성 폐기 완료를 대기 중...", "info");
+            const settled = await Promise.allSettled(state.pendingSegmentTasks);
+            const rejected = settled.filter((r) => r.status === "rejected");
+            if (rejected.length > 0 && state.extractedSegmentNotes.length === 0) {
+              throw new Error(rejected[0].reason?.message || "구간 분석에 실패했습니다.");
+            }
+
+            await synthesizeFinalResultFromNotes();
+            await clearIdbStore(STORE_NOTES);
+          }
+
+          clearLiveTranscriptUi();
+          state.recordingState = "idle";
+          updateStatusBadge("done", "초안 생성 · 음성·대본 폐기 완료");
+        } catch (err) {
+          state.recordingState = "idle";
+          updateStatusBadge("idle", "오류 발생 (복구 버퍼 확인)");
+          showError(`초안 생성 중 오류가 발생했습니다:\n${err.message}`);
+          addAuditLog(`초안 생성 실패: ${err.message}`, "err");
+        } finally {
+          state.isBusy = false;
+          updateRecordingButtons();
+          await recalcIdbBytes();
+        }
+      }
+
+      async function generateFromSingleAudioBlob(blob, mime, segmentIndex, transcriptText = "") {
+        try {
+          const promptAudio = buildSingleShotAudioPrompt(transcriptText);
+          const promptTranscript = buildSingleShotTranscriptPrompt(transcriptText);
+
+          const { text } = await sendAudioOrTranscriptAndDispose({
+            blob,
+            rawMime: mime,
+            promptTextAudio: promptAudio,
+            promptTextTranscript: promptTranscript,
+            label: `single_${segmentIndex}`,
+            transcriptText
+          });
+          const parsed = parseGeminiJson(text);
+
+          applyFinalResult(parsed);
+          await deleteSegmentChunksFromIdb(segmentIndex);
+          await clearIdbStore(STORE_NOTES);
+          addAuditLog("단일 구간 초안 생성 및 로컬/IndexedDB 음성 즉시 영구 폐기 완료", "ok");
+        } finally {
+          blob = null;
+        }
+      }
+
+      async function synthesizeFinalResultFromNotes() {
+        state.extractedSegmentNotes.sort((a, b) => a.segmentIndex - b.segmentIndex);
+        if (state.extractedSegmentNotes.length === 0) {
+          throw new Error("추출된 구간 대화 노트가 없어 초안을 만들 수 없습니다.");
+        }
+
+        const prompt = buildSynthesizeFromNotesPrompt(state.extractedSegmentNotes);
+        addAuditLog(`추출된 ${state.extractedSegmentNotes.length}개 구간 노트를 종합해 3단 상호 피드백 생성 중...`, "info");
+
+        const { text } = await callLLMWithFallback({ promptText: prompt, audioPayload: null });
+        const parsed = parseGeminiJson(text);
+        applyFinalResult(parsed);
+        addAuditLog("전체 구간 종합 피드백 초안 생성 완료 (모든 음성 파일 이미 폐기됨)", "ok");
+      }
+
+      async function generateFromTranscriptOnly() {
+        showError("");
+        if (!getApiKey()) {
+          showError(`초안을 생성하려면 먼저 상단에 ${getProvider() === "gateway" ? "게이트웨이 Virtual Key" : "Gemini API 키"}를 입력하세요.`);
+          el.apiKeyInput.focus();
+          return;
+        }
+        if (getProvider() === "gateway" && !getGatewayBaseUrl()) {
+          showError("게이트웨이 API Base URL을 먼저 입력해 주세요.");
+          el.gatewayBaseUrlInput.focus();
+          return;
+        }
+
+        const transcriptText = el.liveTranscriptTextarea.value.trim();
+        if (!transcriptText) {
+          showError("실시간 대화 대본 칸이 비어 있습니다. 녹음을 진행하거나 대화 내용을 붙여넣은 뒤 누르세요.");
+          el.liveTranscriptTextarea.focus();
+          return;
+        }
+
+        state.isBusy = true;
+        updateRecordingButtons();
+        updateStatusBadge("processing", "대본 텍스트로 초안 생성 중...");
+        el.statServerFile.textContent = "음성 외부 무전송 (대본만 전송)";
+        el.statServerFile.className = "audit-stat-value safe";
+
+        try {
+          const prompt = buildSingleShotTranscriptPrompt(transcriptText);
+          const { text } = await callLLMWithFallback({ promptText: prompt, audioPayload: null });
+          const parsed = parseGeminiJson(text);
+          applyFinalResult(parsed);
+          updateStatusBadge("done", "대본 기반 초안 생성 완료");
+          addAuditLog(`대본 텍스트(${transcriptText.length}자)만으로 화자분리 및 3단 초안 생성 완료`, "ok");
+        } catch (err) {
+          updateStatusBadge("idle", "오류");
+          showError(`대본 기반 초안 생성 실패:\n${err.message}`);
+          addAuditLog(`대본 기반 초안 생성 실패: ${err.message}`, "err");
+        } finally {
+          state.isBusy = false;
+          updateRecordingButtons();
+        }
+      }
+
+      // =========================================================================
+      // 10. File Import & Crash Recovery
+      // =========================================================================
+      async function handleAudioFileImport(file) {
+        if (!file) return;
+        showError("");
+        if (!getApiKey()) {
+          showError(`음성 파일을 분석하려면 먼저 ${getProvider() === "gateway" ? "게이트웨이 Virtual Key" : "Gemini API 키"}를 입력하세요.`);
+          el.audioFileInput.value = "";
+          return;
+        }
+        if (getProvider() === "gateway" && !getGatewayBaseUrl()) {
+          showError("게이트웨이 API Base URL을 먼저 입력해 주세요.");
+          el.audioFileInput.value = "";
+          el.gatewayBaseUrlInput.focus();
+          return;
+        }
+
+        state.isBusy = true;
+        updateRecordingButtons();
+        updateStatusBadge("processing", `파일 분석 중 (${formatBytes(file.size)})...`);
+        addAuditLog(`외부 음성 파일 불러오기 (${file.name}, ${formatBytes(file.size)}) — 메모리 참조 후 즉시 폐기 예정`, "info");
+
+        try {
+          state.extractedSegmentNotes = [];
+          state.segmentStatuses = [];
+          state.pendingSegmentTasks = [];
+          renderChunkPills();
+
+          const mime = file.type || (file.name.endsWith(".m4a") ? "audio/mp4" : "audio/mpeg");
+          const backupText = el.liveTranscriptTextarea.value.trim();
+          const promptAudio = buildSingleShotAudioPrompt(backupText);
+          const promptTranscript = buildSingleShotTranscriptPrompt(backupText);
+
+          const { text } = await sendAudioOrTranscriptAndDispose({
+            blob: file,
+            rawMime: mime,
+            promptTextAudio: promptAudio,
+            promptTextTranscript: promptTranscript,
+            label: "imported_file",
+            transcriptText: backupText
+          });
+          const parsed = parseGeminiJson(text);
+          applyFinalResult(parsed);
+
+          updateStatusBadge("done", "파일 초안 생성 · 참조 폐기 완료");
+          addAuditLog("불러온 음성 파일 분석 완료 및 메모리/서버 파일 즉시 폐기 완료", "ok");
+        } catch (err) {
+          updateStatusBadge("idle", "오류");
+          showError(`파일 분석 실패:\n${err.message}`);
+          addAuditLog(`파일 분석 실패: ${err.message}`, "err");
+        } finally {
+          el.audioFileInput.value = "";
+          state.isBusy = false;
+          updateRecordingButtons();
+        }
+      }
+
+      async function recoverInterruptedSession() {
+        showError("");
+        if (!getApiKey()) {
+          showError("복구하여 초안을 생성하려면 먼저 상단에 API 키를 입력하세요.");
+          el.apiKeyInput.focus();
+          return;
+        }
+        if (getProvider() === "gateway" && !getGatewayBaseUrl()) {
+          showError("게이트웨이 API Base URL을 먼저 입력해 주세요.");
+          el.gatewayBaseUrlInput.focus();
+          return;
+        }
+
+        state.isBusy = true;
+        updateRecordingButtons();
+        updateStatusBadge("processing", "중단된 세션 복구 및 음성 폐기 중...");
+
+        try {
+          const allNotes = await getAllIdbRecords(STORE_NOTES);
+          const allChunks = await getAllIdbRecords(STORE_CHUNKS);
+
+          state.extractedSegmentNotes = allNotes.sort((a, b) => a.segmentIndex - b.segmentIndex);
+          state.segmentStatuses = state.extractedSegmentNotes.map((n) => ({
+            index: n.segmentIndex,
+            status: "done",
+            summaryCount: (n.points || []).length
+          }));
+          renderChunkPills();
+
+          const bySeg = new Map();
+          for (const c of allChunks) {
+            if (!bySeg.has(c.segmentIndex)) bySeg.set(c.segmentIndex, []);
+            bySeg.get(c.segmentIndex).push(c);
+          }
+
+          const sortedSegs = Array.from(bySeg.keys()).sort((a, b) => a - b);
+
+          if (state.extractedSegmentNotes.length === 0 && sortedSegs.length === 1) {
+            const segIdx = sortedSegs[0];
+            const list = bySeg.get(segIdx).sort((a, b) => a.chunkSeq - b.chunkSeq);
+            const mime = list[0]?.mime || "audio/webm";
+            const fullBlob = list.length === 1 && list[0].isCompleteSegment
+              ? list[0].blob
+              : new Blob(list.map((x) => x.blob), { type: mime });
+            await generateFromSingleAudioBlob(fullBlob, mime, segIdx, el.liveTranscriptTextarea.value.trim());
+          } else {
+            for (const segIdx of sortedSegs) {
+              const list = bySeg.get(segIdx).sort((a, b) => a.chunkSeq - b.chunkSeq);
+              const mime = list[0]?.mime || "audio/webm";
+              const fullBlob = list.length === 1 && list[0].isCompleteSegment
+                ? list[0].blob
+                : new Blob(list.map((x) => x.blob), { type: mime });
+              await processSegmentInBackground(segIdx, fullBlob, mime, "");
+            }
+            await synthesizeFinalResultFromNotes();
+            await clearIdbStore(STORE_NOTES);
+          }
+
+          el.recoveryBanner.classList.remove("visible");
+          updateStatusBadge("done", "복구 초안 생성 · 음성 폐기 완료");
+          addAuditLog("중단 세션 복구 완료 및 모든 임시 음성 파기 완료", "ok");
+        } catch (err) {
+          updateStatusBadge("idle", "복구 오류");
+          showError(`세션 복구 중 오류:\n${err.message}`);
+          addAuditLog(`세션 복구 실패: ${err.message}`, "err");
+        } finally {
+          state.isBusy = false;
+          updateRecordingButtons();
+          await recalcIdbBytes();
+        }
+      }
+
+      // =========================================================================
+      // 11. 3-Part Results Rendering, Role Swap & Text-Only Refinement
+      // =========================================================================
+      function applyFinalResult(raw) {
+        const points = Array.isArray(raw.conversationPoints)
+          ? raw.conversationPoints.map((p, idx) => ({
+              id: p.id || `pt_${idx + 1}`,
+              speaker: p.speaker || "공통",
+              category: p.category || "구현설명",
+              summary: p.summary || "",
+              checked: true
+            }))
+          : [];
+
+        state.finalResult = {
+          inferredRoles: raw.inferredRoles || { speakerA: "평가자", speakerB: "피평가자" },
+          conversationPoints: points,
+          reviewerToRevieweeDraft: raw.reviewerToRevieweeDraft || "",
+          revieweeToReviewerDraft: raw.revieweeToReviewerDraft || ""
+        };
+
+        renderResults();
+      }
+
+      function renderResults() {
+        if (!state.finalResult) {
+          el.resultsSection.classList.remove("visible");
+          return;
+        }
+        el.resultsSection.classList.add("visible");
+
+        el.roleSpeakerA.textContent = state.finalResult.inferredRoles.speakerA || "-";
+        el.roleSpeakerB.textContent = state.finalResult.inferredRoles.speakerB || "-";
+
+        renderPointsList();
+
+        el.reviewerDraftTextarea.value = state.finalResult.reviewerToRevieweeDraft || "";
+        el.revieweeDraftTextarea.value = state.finalResult.revieweeToReviewerDraft || "";
+        updateCharCount(el.reviewerDraftTextarea, el.reviewerCharCount);
+        updateCharCount(el.revieweeDraftTextarea, el.revieweeCharCount);
+
+        el.resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      function renderPointsList() {
+        el.pointsList.innerHTML = "";
+        const points = state.finalResult?.conversationPoints || [];
+        if (points.length === 0) {
+          el.pointsList.innerHTML = `<div class="help-text">추출된 대화 포인트가 없습니다. 아래 입력칸에서 직접 추가할 수 있습니다.</div>`;
+          return;
+        }
+
+        points.forEach((pt, idx) => {
+          const item = document.createElement("label");
+          item.className = "point-item";
+
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = pt.checked !== false;
+          cb.addEventListener("change", () => {
+            pt.checked = cb.checked;
+          });
+
+          const body = document.createElement("div");
+          body.className = "point-body";
+
+          const tags = document.createElement("div");
+          tags.className = "point-tags";
+
+          const spTag = document.createElement("span");
+          spTag.className = `tag ${pt.speaker === "평가자" ? "tag-reviewer" : pt.speaker === "피평가자" ? "tag-reviewee" : "tag-common"}`;
+          spTag.textContent = pt.speaker;
+
+          const catTag = document.createElement("span");
+          catTag.className = "tag tag-cat";
+          catTag.textContent = pt.category;
+
+          tags.appendChild(spTag);
+          tags.appendChild(catTag);
+
+          const textDiv = document.createElement("div");
+          textDiv.textContent = pt.summary;
+
+          body.appendChild(tags);
+          body.appendChild(textDiv);
+
+          item.appendChild(cb);
+          item.appendChild(body);
+          el.pointsList.appendChild(item);
+        });
+      }
+
+      async function regenerateDraftsFromPoints() {
+        if (!state.finalResult) return;
+        showError("");
+        const checkedPoints = state.finalResult.conversationPoints.filter((p) => p.checked !== false);
+        if (checkedPoints.length === 0) {
+          showError("초안에 반영할 핵심 포인트를 1개 이상 체크해 주세요.");
+          return;
+        }
+
+        state.isBusy = true;
+        updateRecordingButtons();
+        el.btnSwapRoles.disabled = true;
+        el.btnRegenerateDrafts.disabled = true;
+        updateStatusBadge("processing", "텍스트 노트 기반 초안 재작성 중...");
+
+        try {
+          const prompt = buildRefineFromPointsPrompt(checkedPoints, state.finalResult.inferredRoles);
+          const { text } = await callLLMWithFallback({ promptText: prompt, audioPayload: null });
+          const parsed = parseGeminiJson(text);
+
+          state.finalResult.reviewerToRevieweeDraft = parsed.reviewerToRevieweeDraft || "";
+          state.finalResult.revieweeToReviewerDraft = parsed.revieweeToReviewerDraft || "";
+
+          el.reviewerDraftTextarea.value = state.finalResult.reviewerToRevieweeDraft;
+          el.revieweeDraftTextarea.value = state.finalResult.revieweeToReviewerDraft;
+          updateCharCount(el.reviewerDraftTextarea, el.reviewerCharCount);
+          updateCharCount(el.revieweeDraftTextarea, el.revieweeCharCount);
+
+          updateStatusBadge("done", "초안 재작성 완료 (음성 데이터 없음)");
+          addAuditLog("음성 재전송 없이 텍스트 포인트만으로 양쪽 피드백 초안 재작성 완료", "ok");
+        } catch (err) {
+          updateStatusBadge("done", "재작성 오류");
+          showError(`초안 재작성 실패:\n${err.message}`);
+          addAuditLog(`초안 재작성 실패: ${err.message}`, "err");
+        } finally {
+          state.isBusy = false;
+          updateRecordingButtons();
+          el.btnSwapRoles.disabled = false;
+          el.btnRegenerateDrafts.disabled = false;
+        }
+      }
+
+      async function swapSpeakerRolesAndRegenerate() {
+        if (!state.finalResult) return;
+        const roles = state.finalResult.inferredRoles;
+        const prevA = roles.speakerA || "";
+        const prevB = roles.speakerB || "";
+        roles.speakerA = prevB;
+        roles.speakerB = prevA;
+
+        for (const pt of state.finalResult.conversationPoints) {
+          if (pt.speaker === "평가자") pt.speaker = "피평가자";
+          else if (pt.speaker === "피평가자") pt.speaker = "평가자";
+        }
+
+        el.roleSpeakerA.textContent = roles.speakerA;
+        el.roleSpeakerB.textContent = roles.speakerB;
+        renderPointsList();
+        addAuditLog("평가자 ↔ 피평가자 역할 반전 적용 → 초안 즉시 재작성 시작", "info");
+
+        await regenerateDraftsFromPoints();
+      }
+
+      function addCustomPoint() {
+        if (!state.finalResult) return;
+        const text = el.customPointInput.value.trim();
+        if (!text) return;
+        state.finalResult.conversationPoints.push({
+          id: generateId("pt"),
+          speaker: el.customPointSpeaker.value,
+          category: el.customPointCategory.value,
+          summary: text,
+          checked: true
+        });
+        el.customPointInput.value = "";
+        renderPointsList();
+      }
+
+      async function copyTextToClipboard(text, btn, originalLabel) {
+        if (!text) return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            throw new Error("Clipboard API unavailable");
+          }
+        } catch (_) {
+          const temp = document.createElement("textarea");
+          temp.value = text;
+          temp.style.position = "fixed";
+          temp.style.opacity = "0";
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand("copy");
+          document.body.removeChild(temp);
+        }
+
+        btn.textContent = "복사 완료!";
+        setTimeout(() => {
+          btn.textContent = originalLabel;
+        }, 1600);
+      }
+
+      // =========================================================================
+      // 12. Full Immediate Purge & UI Controls
+      // =========================================================================
+      async function purgeAllDataNow() {
+        showError("");
+        // 녹음 중이면 먼저 중지
+        if (state.recordingState === "recording" || state.recordingState === "paused") {
+          await stopCurrentRecorderAndCollectBlob();
+          stopMicStreamAndTimers();
+          state.recordingState = "idle";
+        } else {
+          stopSpeechRecognition(false);
+        }
+
+        // 서버에 남아있는 임시 파일이 혹시 있다면 삭제 시도
+        for (const fname of Array.from(state.serverActiveFiles)) {
+          await deleteGeminiServerFile(fname);
+        }
+
+        // RAM 초기화
+        state.currentRamChunks.length = 0;
+        state.currentRamChunks = [];
+        state.currentRamBytes = 0;
+        state.extractedSegmentNotes = [];
+        state.segmentStatuses = [];
+        state.pendingSegmentTasks = [];
+        state.finalResult = null;
+        state.totalActiveSeconds = 0;
+        state.segmentActiveSeconds = 0;
+        clearLiveTranscriptUi();
+
+        // IndexedDB 완전 비우기
+        await clearIdbStore(STORE_CHUNKS);
+        await clearIdbStore(STORE_NOTES);
+
+        // UI 리셋
+        el.timerDisplay.textContent = "00:00:00";
+        el.nextRotateCountdown.textContent = formatMMSS(SEGMENT_ROTATE_SECONDS);
+        el.completedSegmentCount.textContent = "0개";
+        el.audioFileInput.value = "";
+        el.recoveryBanner.classList.remove("visible");
+        el.reviewerDraftTextarea.value = "";
+        el.revieweeDraftTextarea.value = "";
+        el.resultsSection.classList.remove("visible");
+        renderChunkPills();
+        updateRecordingButtons();
+        updateStorageIndicators();
+        updateStatusBadge("idle", "모든 데이터 완전 파기됨");
+        el.statServerFile.textContent = "업로드된 파일 없음";
+        el.statServerFile.className = "audit-stat-value safe";
+
+        addAuditLog("사용자 요청으로 모든 로컬 RAM, IndexedDB, 대본, 결과 초안을 즉시 영구 파기했습니다.", "ok");
+      }
+
+      function updateRecordingButtons() {
+        const rec = state.recordingState;
+        const busy = state.isBusy;
+
+        el.btnStartRec.disabled = busy || rec !== "idle";
+        el.btnPauseRec.disabled = busy || (rec !== "recording" && rec !== "paused");
+        el.btnRotateChunk.disabled = busy || (rec !== "recording" && rec !== "paused");
+        el.btnStopAndGenerate.disabled = busy || (rec !== "recording" && rec !== "paused");
+        el.btnImportFile.disabled = busy || rec !== "idle";
+        el.btnGenerateFromTranscript.disabled = busy || rec !== "idle";
+
+        if (rec === "idle") {
+          el.btnPauseRec.textContent = "❚❚ 일시정지";
+        }
+      }
+
+      // =========================================================================
+      // 13. Event Listeners & Init
+      // =========================================================================
+      function bindEvents() {
+        el.providerSelect.addEventListener("change", () => {
+          applyProviderUiState();
+          addAuditLog(`API 제공자 전환: ${getProvider() === "gateway" ? "호환 게이트웨이 API" : "Google AI Studio 직접 호출"}`, "info");
+        });
+
+        el.apiKeyInput.addEventListener("input", saveApiKeyToStorage);
+        el.gatewayBaseUrlInput.addEventListener("input", saveGatewayBaseUrlToStorage);
+        el.gatewayBaseUrlInput.addEventListener("blur", () => {
+          const clean = getGatewayBaseUrl();
+          if (clean) el.gatewayBaseUrlInput.value = clean;
+          saveGatewayBaseUrlToStorage();
+        });
+        el.rememberKeyCheckbox.addEventListener("change", saveApiKeyToStorage);
+
+        el.btnToggleKey.addEventListener("click", () => {
+          const isPw = el.apiKeyInput.type === "password";
+          el.apiKeyInput.type = isPw ? "text" : "password";
+          el.btnToggleKey.textContent = isPw ? "숨기기" : "보기";
+        });
+
+        el.btnClearKey.addEventListener("click", () => {
+          el.apiKeyInput.value = "";
+          el.gatewayBaseUrlInput.value = "";
+          el.rememberKeyCheckbox.checked = false;
+          ["gateway", "google_direct"].forEach((p) => {
+            const k = getStorageKeyForProvider(p);
+            sessionStorage.removeItem(k);
+            localStorage.removeItem(k);
+          });
+          sessionStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+          localStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+          sessionStorage.removeItem(LEGACY_GOOGLE_KEY_STORAGE);
+          localStorage.removeItem(LEGACY_GOOGLE_KEY_STORAGE);
+          state.syncedModelsByProvider = { gateway: [], google_direct: [] };
+          renderModelSelectOptions();
+          el.modelSyncStatus.textContent = "저장된 모든 API 키와 게이트웨이 주소가 삭제되었습니다.";
+          addAuditLog("저장된 모든 API 키와 게이트웨이 주소를 즉시 삭제했습니다.", "ok");
+        });
+
+        el.btnSyncModels.addEventListener("click", () => fetchAvailableModels(false));
+
+        el.modelSelect.addEventListener("change", () => {
+          if (el.modelSelect.value === "__custom__") {
+            el.customModelInput.classList.remove("hidden");
+            el.customModelInput.focus();
+          } else {
+            el.customModelInput.classList.add("hidden");
+          }
+        });
+
+        el.btnStartRec.addEventListener("click", startRecording);
+        el.btnPauseRec.addEventListener("click", togglePauseRecording);
+        el.btnRotateChunk.addEventListener("click", () => rotateSegmentNow(true));
+        el.btnStopAndGenerate.addEventListener("click", stopAndGenerateAll);
+        el.btnGenerateFromTranscript.addEventListener("click", generateFromTranscriptOnly);
+
+        el.btnImportFile.addEventListener("click", () => el.audioFileInput.click());
+        el.audioFileInput.addEventListener("change", (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (file) handleAudioFileImport(file);
+        });
+
+        el.btnRecoverProcess.addEventListener("click", recoverInterruptedSession);
+        el.btnRecoverDiscard.addEventListener("click", async () => {
+          await purgeAllDataNow();
+          el.recoveryBanner.classList.remove("visible");
+        });
+
+        el.btnPurgeAll.addEventListener("click", purgeAllDataNow);
+
+        el.btnSwapRoles.addEventListener("click", swapSpeakerRolesAndRegenerate);
+        el.btnRegenerateDrafts.addEventListener("click", regenerateDraftsFromPoints);
+
+        el.btnAddCustomPoint.addEventListener("click", addCustomPoint);
+        el.customPointInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            addCustomPoint();
+          }
+        });
+
+        el.reviewerDraftTextarea.addEventListener("input", () => updateCharCount(el.reviewerDraftTextarea, el.reviewerCharCount));
+        el.revieweeDraftTextarea.addEventListener("input", () => updateCharCount(el.revieweeDraftTextarea, el.revieweeCharCount));
+
+        el.btnCopyReviewer.addEventListener("click", () =>
+          copyTextToClipboard(el.reviewerDraftTextarea.value, el.btnCopyReviewer, "클립보드 복사")
+        );
+        el.btnCopyReviewee.addEventListener("click", () =>
+          copyTextToClipboard(el.revieweeDraftTextarea.value, el.btnCopyReviewee, "클립보드 복사")
+        );
+
+        // 창 닫힘 / 새로고침 실수 방지
+        window.addEventListener("beforeunload", (e) => {
+          const hasUnfinished =
+            state.recordingState === "recording" ||
+            state.recordingState === "paused" ||
+            state.isBusy ||
+            state.currentRamBytes > 0 ||
+            state.idbCachedBytes > 0 ||
+            el.liveTranscriptTextarea.value.trim().length > 0 ||
+            state.finalResult !== null;
+
+          if (hasUnfinished) {
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        });
+      }
+
+      async function init() {
+        applyProviderUiState();
+        bindEvents();
+        updateRecordingButtons();
+        addAuditLog("초기화 완료 (기본: 호환 게이트웨이 API · 구형 2.5 이하 채팅 모델 폴백 제외 · 버퍼 비어 있음)", "info");
+
+        try {
+          state.db = await openDb();
+          await checkCrashRecoveryOnLoad();
+        } catch (err) {
+          addAuditLog(`IndexedDB 초기화 실패 (메모리 단독 모드로 동작): ${err.message}`, "warn");
+        }
+
+        if (getApiKey() && (getProvider() !== "gateway" || getGatewayBaseUrl())) {
+          fetchAvailableModels(true);
+        }
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>
