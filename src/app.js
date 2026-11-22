@@ -28,15 +28,18 @@ import {
   calcIdbChunkBytes,
   clearIdbStore,
   clearStoredGatewayConfig,
+  clearTranscriptBackup,
   deleteSegmentChunksFromIdb,
   getAllIdbRecords,
   loadStoredGatewayConfig,
+  loadTranscriptBackup,
   openDb,
   replaceSegmentChunksWithFullBlobInIdb,
   saveActiveChunkToIdb,
   saveExtractedNoteToIdb,
   saveStoredGatewayBaseUrl,
-  saveStoredGatewayConfig
+  saveStoredGatewayConfig,
+  saveTranscriptBackup
 } from "./storage.js";
 import {
   callLLMWithFallback,
@@ -94,15 +97,52 @@ const state = {
   localProxyRuntime: "",
   gatewayAudioSupport: "unknown", // unknown | supported | unsupported
   keyProtocolScope: "unknown", // unknown | openai_ok | wrong_protocol
+  wakeLockSentinel: null,
   finalResult: null,
   isBusy: false
 };
+
+function persistTranscriptBackupNow() {
+  saveTranscriptBackup({
+    transcriptText: el.liveTranscriptTextarea.value,
+    missionMemo: el.missionMemoInput.value,
+    totalActiveSeconds: state.totalActiveSeconds
+  });
+}
+
+async function requestScreenWakeLock() {
+  if (typeof navigator === "undefined" || !navigator.wakeLock?.request) return;
+  if (state.wakeLockSentinel && !state.wakeLockSentinel.released) return;
+  try {
+    const sentinel = await navigator.wakeLock.request("screen");
+    state.wakeLockSentinel = sentinel;
+    sentinel.addEventListener?.("release", () => {
+      if (state.wakeLockSentinel === sentinel) {
+        state.wakeLockSentinel = null;
+      }
+    });
+  } catch {
+    // 미지원 또는 권한 거부 시 조용히 무시
+  }
+}
+
+async function releaseScreenWakeLock() {
+  const sentinel = state.wakeLockSentinel;
+  if (!sentinel) return;
+  state.wakeLockSentinel = null;
+  try {
+    await sentinel.release();
+  } catch {
+    // ignore
+  }
+}
 
 const speech = createSpeechController({
   onFinalChunk: (txt) => {
     const prevBox = el.liveTranscriptTextarea.value.trim();
     el.liveTranscriptTextarea.value = prevBox ? `${prevBox}\n${txt}` : txt;
     el.liveTranscriptTextarea.scrollTop = el.liveTranscriptTextarea.scrollHeight;
+    persistTranscriptBackupNow();
   },
   onInterim: (interim) => {
     el.speechInterimLine.textContent = interim ? `인식 중: ${interim}` : "";
@@ -148,7 +188,11 @@ function syncConnectionIndicators() {
 
 function syncUploadModeUi() {
   const isTextOnly = el.uploadModeSelect.value === "speech_text_only";
+  if (el.textModeBatchMetric) el.textModeBatchMetric.classList.toggle("hidden", !isTextOnly);
   if (el.bufferMetricItem) el.bufferMetricItem.classList.toggle("hidden", isTextOnly);
+  if (el.rotateCountdownMetricItem) el.rotateCountdownMetricItem.classList.toggle("hidden", isTextOnly);
+  if (el.completedSegmentMetricItem) el.completedSegmentMetricItem.classList.toggle("hidden", isTextOnly);
+  if (el.btnRotateChunk) el.btnRotateChunk.classList.toggle("hidden", isTextOnly);
   if (el.btnImportFile) el.btnImportFile.classList.toggle("hidden", isTextOnly);
   syncConnectionIndicators();
 }
@@ -574,6 +618,7 @@ function clearLiveTranscriptUi() {
 function stopMicStreamAndTimers() {
   speech.setActive(false);
   speech.stop(true, "대기");
+  releaseScreenWakeLock();
   if (state.timerInterval) {
     clearInterval(state.timerInterval);
     state.timerInterval = null;
@@ -814,16 +859,26 @@ async function startRecording() {
     });
 
     const isTextOnly = el.uploadModeSelect.value === "speech_text_only";
+    const existingTranscript = el.liveTranscriptTextarea.value.trim();
     state.mediaStream = stream;
     state.activeMimeType = isTextOnly ? "" : getSupportedMimeType();
     state.sessionId = generateId("sess");
     state.currentSegmentIndex = 1;
-    state.totalActiveSeconds = 0;
+    if (!existingTranscript) {
+      state.totalActiveSeconds = 0;
+    }
     state.segmentActiveSeconds = 0;
     state.segmentStatuses = [];
     state.extractedSegmentNotes = [];
     state.pendingSegmentTasks = [];
-    clearLiveTranscriptUi();
+    if (!existingTranscript) {
+      clearLiveTranscriptUi();
+      clearTranscriptBackup();
+    } else {
+      speech.reset();
+      el.speechInterimLine.textContent = "";
+      persistTranscriptBackupNow();
+    }
     el.recoveryBanner.classList.remove("visible");
     await clearIdbStore(state.db, STORE_CHUNKS);
     await clearIdbStore(state.db, STORE_NOTES);
@@ -841,18 +896,19 @@ async function startRecording() {
     state.stopWaveformFn = startWaveform(el.waveformCanvas, stream, () => state.recordingState);
 
     state.recordingState = "recording";
+    await requestScreenWakeLock();
     speech.setActive(true);
     speech.start();
     syncRecordingButtons();
     updateStatusBadge(el, "recording", "녹음 중");
-    el.timerDisplay.textContent = "00:00:00";
+    el.timerDisplay.textContent = formatDuration(state.totalActiveSeconds);
     el.nextRotateCountdown.textContent = formatMMSS(SEGMENT_ROTATE_SECONDS);
     el.completedSegmentCount.textContent = "0개";
 
     addAuditLog(
       el,
       isTextOnly
-        ? "마이크 녹음 시작 (실시간 받아적기 전용 · 음성 로컬 무저장/외부 무전송)"
+        ? "마이크 녹음 시작 (실시간 받아적기 전용 · 종료 시 일괄 분석 · 대본 자동 백업)"
         : `마이크 녹음 시작 (모드: ${el.uploadModeSelect.value} · 코덱: ${state.activeMimeType || "브라우저 기본"})`,
       "info"
     );
@@ -863,11 +919,19 @@ async function startRecording() {
         state.totalActiveSeconds += 1;
         state.segmentActiveSeconds += 1;
         el.timerDisplay.textContent = formatDuration(state.totalActiveSeconds);
-        const remain = Math.max(0, SEGMENT_ROTATE_SECONDS - state.segmentActiveSeconds);
-        el.nextRotateCountdown.textContent = formatMMSS(remain);
 
-        if (state.segmentActiveSeconds >= SEGMENT_ROTATE_SECONDS && !state.isRotating) {
-          rotateSegmentNow(false).catch((e) => showError(el, `구간 분할 중 오류: ${e.message}`));
+        const activeTextOnly = el.uploadModeSelect.value === "speech_text_only";
+        if (!activeTextOnly) {
+          const remain = Math.max(0, SEGMENT_ROTATE_SECONDS - state.segmentActiveSeconds);
+          el.nextRotateCountdown.textContent = formatMMSS(remain);
+
+          if (state.segmentActiveSeconds >= SEGMENT_ROTATE_SECONDS && !state.isRotating) {
+            rotateSegmentNow(false).catch((e) => showError(el, `구간 분할 중 오류: ${e.message}`));
+          }
+        }
+
+        if (state.totalActiveSeconds % 5 === 0 && el.liveTranscriptTextarea.value.trim()) {
+          persistTranscriptBackupNow();
         }
       }
     }, 1000);
@@ -884,12 +948,15 @@ function togglePauseRecording() {
     state.recordingState = "paused";
     speech.setActive(true);
     speech.stop(true, "음성인식 일시정지");
+    persistTranscriptBackupNow();
+    releaseScreenWakeLock();
     el.btnPauseRec.textContent = "▶ 녹음 재개";
     updateStatusBadge(el, "paused", "일시정지");
     addAuditLog(el, "녹음 일시정지", "info");
   } else if (state.recordingState === "paused") {
     state.mediaRecorder?.resume();
     state.recordingState = "recording";
+    requestScreenWakeLock();
     speech.setActive(true);
     speech.start();
     el.btnPauseRec.textContent = "❚❚ 일시정지";
@@ -914,9 +981,13 @@ async function stopAndGenerateAll() {
 
     const finalSegTranscript = speech.consumeSegmentTranscript(finalSegIdx);
     const fullTextareaTranscript = el.liveTranscriptTextarea.value.trim();
+    if (!fullTextareaTranscript && finalSegTranscript) {
+      el.liveTranscriptTextarea.value = finalSegTranscript;
+    }
+    persistTranscriptBackupNow();
 
     if (state.extractedSegmentNotes.length === 0 && state.pendingSegmentTasks.length === 0) {
-      const effectiveTranscript = fullTextareaTranscript || finalSegTranscript;
+      const effectiveTranscript = el.liveTranscriptTextarea.value.trim() || finalSegTranscript;
       if ((!blob || blob.size < 1024) && !effectiveTranscript) {
         throw new Error("녹음된 음성과 인식된 대본이 모두 비어 있습니다.");
       }
@@ -941,13 +1012,15 @@ async function stopAndGenerateAll() {
     }
 
     clearLiveTranscriptUi();
+    clearTranscriptBackup();
+    el.recoveryBanner.classList.remove("visible");
     state.recordingState = "idle";
     updateStatusBadge(el, "done", "초안 생성 · 음성 폐기 완료");
   } catch (err) {
     state.recordingState = "idle";
-    updateStatusBadge(el, "idle", "오류 발생 (복구 버퍼 확인)");
+    updateStatusBadge(el, "idle", "오류 발생 (대본·복구 버퍼 유지됨)");
     showError(el, `초안 생성 중 오류가 발생했습니다:\n${err.message}`);
-    addAuditLog(el, `초안 생성 실패: ${err.message}`, "err");
+    addAuditLog(el, `초안 생성 실패 (대본 및 복구 백업 유지됨): ${err.message}`, "err");
   } finally {
     state.isBusy = false;
     syncRecordingButtons();
@@ -980,8 +1053,10 @@ async function generateFromTranscriptOnly() {
     const { text } = await runLLM(prompt, null);
     const parsed = parseModelJson(text);
     applyFinalResult(parsed);
+    clearTranscriptBackup();
+    el.recoveryBanner.classList.remove("visible");
     updateStatusBadge(el, "done", "대본 기반 초안 생성 완료");
-    addAuditLog(el, `보조 대본(${transcriptText.length}자)으로 화자분리 및 3단 초안 생성 완료`, "ok");
+    addAuditLog(el, `보조 대본(${transcriptText.length}자)으로 화자분리 및 3단 초안 생성 완료 (임시 백업 파기됨)`, "ok");
   } catch (err) {
     updateStatusBadge(el, "idle", "오류");
     showError(el, `대본 기반 초안 생성 실패:\n${err.message}`);
@@ -1055,18 +1130,59 @@ async function handleAudioFileImport(file) {
 }
 
 async function checkCrashRecoveryOnLoad() {
-  const chunks = await getAllIdbRecords(state.db, STORE_CHUNKS);
-  const notes = await getAllIdbRecords(state.db, STORE_NOTES);
+  const chunks = state.db ? await getAllIdbRecords(state.db, STORE_CHUNKS) : [];
+  const notes = state.db ? await getAllIdbRecords(state.db, STORE_NOTES) : [];
+  const transcriptBackup = loadTranscriptBackup();
   await recalcIdbBytes();
 
-  if (chunks.length === 0 && notes.length === 0) return;
+  if (chunks.length === 0 && notes.length === 0 && !transcriptBackup) return;
+
+  if (transcriptBackup) {
+    el.liveTranscriptTextarea.value = transcriptBackup.transcriptText;
+    if (transcriptBackup.missionMemo && !el.missionMemoInput.value.trim()) {
+      el.missionMemoInput.value = transcriptBackup.missionMemo;
+    }
+    if (transcriptBackup.totalActiveSeconds > 0) {
+      state.totalActiveSeconds = transcriptBackup.totalActiveSeconds;
+      el.timerDisplay.textContent = formatDuration(state.totalActiveSeconds);
+    }
+    if (el.transcriptDetails) {
+      el.transcriptDetails.open = true;
+    }
+    el.btnRecoverRestoreOnly?.classList.remove("hidden");
+  } else {
+    el.btnRecoverRestoreOnly?.classList.add("hidden");
+  }
 
   const totalChunkBytes = chunks.reduce((acc, c) => acc + (c.size || (c.blob ? c.blob.size : 0)), 0);
   const segCount = new Set(chunks.map((c) => c.segmentIndex)).size;
+
+  if (chunks.length === 0 && notes.length === 0 && transcriptBackup) {
+    const durationNote = transcriptBackup.totalActiveSeconds > 0
+      ? ` (녹음 경과 ${formatDuration(transcriptBackup.totalActiveSeconds)})`
+      : "";
+    el.recoveryDesc.textContent =
+      `자동 백업된 실시간 대본 ${transcriptBackup.transcriptText.length}자${durationNote}가 발견되어 아래 대본 칸에 복원해 두었습니다. 바로 초안을 생성하거나, 대본 칸으로만 복원해 내용을 다듬고 이어서 녹음할 수 있습니다.`;
+    el.recoveryBanner.classList.add("visible");
+    addAuditLog(
+      el,
+      `이전 세션 자동 백업 대본 감지 및 복원됨: ${transcriptBackup.transcriptText.length}자${durationNote}`,
+      "warn"
+    );
+    return;
+  }
+
+  const transcriptSuffix = transcriptBackup
+    ? ` 및 자동 백업 대본 ${transcriptBackup.transcriptText.length}자`
+    : "";
   el.recoveryDesc.textContent =
-    `미처리 음성 버퍼 ${segCount}개 구간 (${formatBytes(totalChunkBytes)}) 및 추출된 구간 노트 ${notes.length}개가 남아 있습니다. 복구해 초안을 만든 뒤 음성을 즉시 폐기할 수 있습니다.`;
+    `미처리 음성 버퍼 ${segCount}개 구간 (${formatBytes(totalChunkBytes)}), 추출된 구간 노트 ${notes.length}개${transcriptSuffix}가 남아 있습니다. 복구해 초안을 만든 뒤 임시 데이터를 즉시 폐기할 수 있습니다.`;
   el.recoveryBanner.classList.add("visible");
-  addAuditLog(el, `이전 비정상 종료 버퍼 감지: 음성 ${formatBytes(totalChunkBytes)}, 노트 ${notes.length}개`, "warn");
+  addAuditLog(
+    el,
+    `이전 비정상 종료 버퍼 감지: 음성 ${formatBytes(totalChunkBytes)}, 노트 ${notes.length}개${transcriptSuffix}`,
+    "warn"
+  );
 }
 
 async function recoverInterruptedSession() {
@@ -1075,11 +1191,33 @@ async function recoverInterruptedSession() {
 
   state.isBusy = true;
   syncRecordingButtons();
-  updateStatusBadge(el, "processing", "중단된 세션 복구 및 음성 폐기 중...");
+  updateStatusBadge(el, "processing", "중단된 세션 복구 및 초안 생성 중...");
 
   try {
-    const allNotes = await getAllIdbRecords(state.db, STORE_NOTES);
-    const allChunks = await getAllIdbRecords(state.db, STORE_CHUNKS);
+    const allNotes = state.db ? await getAllIdbRecords(state.db, STORE_NOTES) : [];
+    const allChunks = state.db ? await getAllIdbRecords(state.db, STORE_CHUNKS) : [];
+    const backupTranscript = el.liveTranscriptTextarea.value.trim() || loadTranscriptBackup()?.transcriptText || "";
+
+    if (allNotes.length === 0 && allChunks.length === 0) {
+      if (!backupTranscript) {
+        throw new Error("복구할 대본이나 음성 버퍼가 없습니다.");
+      }
+      const prompt = buildSingleShotTranscriptPrompt({
+        memo: el.missionMemoInput.value,
+        tone: el.toneSelect.value,
+        length: el.lengthSelect.value,
+        transcriptText: backupTranscript
+      });
+      const { text } = await runLLM(prompt, null);
+      const parsed = parseModelJson(text);
+      applyFinalResult(parsed);
+      clearLiveTranscriptUi();
+      clearTranscriptBackup();
+      el.recoveryBanner.classList.remove("visible");
+      updateStatusBadge(el, "done", "복구 대본 초안 생성 · 백업 폐기 완료");
+      addAuditLog(el, `자동 백업된 대본(${backupTranscript.length}자)으로 3단 초안 생성 및 임시 백업 영구 삭제 완료`, "ok");
+      return;
+    }
 
     state.extractedSegmentNotes = allNotes.sort((a, b) => a.segmentIndex - b.segmentIndex);
     state.segmentStatuses = state.extractedSegmentNotes.map((n) => ({
@@ -1104,7 +1242,7 @@ async function recoverInterruptedSession() {
       const fullBlob = list.length === 1 && list[0].isCompleteSegment
         ? list[0].blob
         : new Blob(list.map((x) => x.blob), { type: mime });
-      await generateFromSingleAudioBlob(fullBlob, mime, segIdx, el.liveTranscriptTextarea.value.trim());
+      await generateFromSingleAudioBlob(fullBlob, mime, segIdx, backupTranscript);
     } else {
       for (const segIdx of sortedSegs) {
         const list = bySeg.get(segIdx).sort((a, b) => a.chunkSeq - b.chunkSeq);
@@ -1118,9 +1256,11 @@ async function recoverInterruptedSession() {
       await clearIdbStore(state.db, STORE_NOTES);
     }
 
+    clearLiveTranscriptUi();
+    clearTranscriptBackup();
     el.recoveryBanner.classList.remove("visible");
     updateStatusBadge(el, "done", "복구 초안 생성 · 음성 폐기 완료");
-    addAuditLog(el, "중단 세션 복구 완료 및 모든 임시 음성 파기 완료", "ok");
+    addAuditLog(el, "중단 세션 복구 완료 및 모든 임시 음성·백업 대본 파기 완료", "ok");
   } catch (err) {
     updateStatusBadge(el, "idle", "복구 오류");
     showError(el, `세션 복구 중 오류:\n${err.message}`);
@@ -1225,6 +1365,7 @@ async function purgeAllDataNow() {
   } else {
     speech.setActive(false);
     speech.stop(false, "대기");
+    releaseScreenWakeLock();
   }
 
   state.currentRamChunks.length = 0;
@@ -1237,6 +1378,7 @@ async function purgeAllDataNow() {
   state.totalActiveSeconds = 0;
   state.segmentActiveSeconds = 0;
   clearLiveTranscriptUi();
+  clearTranscriptBackup();
 
   await clearIdbStore(state.db, STORE_CHUNKS);
   await clearIdbStore(state.db, STORE_NOTES);
@@ -1364,10 +1506,31 @@ function bindEvents() {
     if (file) handleAudioFileImport(file);
   });
 
+  el.liveTranscriptTextarea.addEventListener("input", persistTranscriptBackupNow);
+  el.missionMemoInput.addEventListener("input", () => {
+    if (el.liveTranscriptTextarea.value.trim()) {
+      persistTranscriptBackupNow();
+    }
+  });
+
   el.btnRecoverProcess.addEventListener("click", recoverInterruptedSession);
+  if (el.btnRecoverRestoreOnly) {
+    el.btnRecoverRestoreOnly.addEventListener("click", () => {
+      el.recoveryBanner.classList.remove("visible");
+      if (el.transcriptDetails) el.transcriptDetails.open = true;
+      el.liveTranscriptTextarea.focus();
+      addAuditLog(el, "백업된 대본을 입력칸으로 복원했습니다. 내용을 다듬거나 녹음을 이어갈 수 있습니다.", "info");
+    });
+  }
   el.btnRecoverDiscard.addEventListener("click", async () => {
     await purgeAllDataNow();
     el.recoveryBanner.classList.remove("visible");
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.recordingState === "recording") {
+      requestScreenWakeLock();
+    }
   });
 
   el.btnPurgeAll.addEventListener("click", purgeAllDataNow);
@@ -1445,6 +1608,7 @@ async function init() {
     await checkCrashRecoveryOnLoad();
   } catch (err) {
     addAuditLog(el, `IndexedDB 초기화 실패 (메모리 단독 모드로 동작): ${err.message}`, "warn");
+    await checkCrashRecoveryOnLoad();
   }
 
   if (getApiKey() && getGatewayBaseUrl() && state.localProxyAvailable) {

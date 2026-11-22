@@ -4,7 +4,8 @@ import {
   GATEWAY_BASE_URL_STORAGE,
   GATEWAY_KEY_STORAGE,
   STORE_CHUNKS,
-  STORE_NOTES
+  STORE_NOTES,
+  TRANSCRIPT_BACKUP_STORAGE
 } from "./constants.js";
 import { extractGatewayUrlParam, normalizeGatewayBaseUrl } from "./utils.js";
 
@@ -165,4 +166,59 @@ export function clearStoredGatewayConfig() {
   localStorage.removeItem(GATEWAY_KEY_STORAGE);
   sessionStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
   localStorage.removeItem(GATEWAY_BASE_URL_STORAGE);
+}
+
+export function clearTranscriptBackup() {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(TRANSCRIPT_BACKUP_STORAGE);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function saveTranscriptBackup({
+  transcriptText = "",
+  missionMemo = "",
+  totalActiveSeconds = 0
+} = {}) {
+  const cleanText = String(transcriptText || "").trim();
+  if (!cleanText) {
+    clearTranscriptBackup();
+    return null;
+  }
+  const record = {
+    transcriptText: cleanText,
+    missionMemo: String(missionMemo || ""),
+    totalActiveSeconds: Number(totalActiveSeconds) || 0,
+    updatedAt: Date.now()
+  };
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(TRANSCRIPT_BACKUP_STORAGE, JSON.stringify(record));
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return record;
+}
+
+export function loadTranscriptBackup() {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(TRANSCRIPT_BACKUP_STORAGE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const cleanText = String(parsed?.transcriptText || "").trim();
+    if (!cleanText) return null;
+    return {
+      transcriptText: cleanText,
+      missionMemo: String(parsed?.missionMemo || ""),
+      totalActiveSeconds: Number(parsed?.totalActiveSeconds) || 0,
+      updatedAt: Number(parsed?.updatedAt) || 0
+    };
+  } catch {
+    return null;
+  }
 }

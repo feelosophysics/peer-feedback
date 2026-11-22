@@ -39,6 +39,12 @@ import {
   resetGatewayFeatureCache,
   runGatewayDiagnostics
 } from "../src/api.js";
+import {
+  clearTranscriptBackup,
+  loadTranscriptBackup,
+  saveTranscriptBackup
+} from "../src/storage.js";
+import { createSpeechController } from "../src/speech.js";
 
 test("normalizeGatewayBaseUrl strips endpoints and ensures https", () => {
   assert.equal(normalizeGatewayBaseUrl(""), "");
@@ -596,4 +602,182 @@ test("runGatewayDiagnostics skips WAV probe by default and returns text_ready", 
       assert.equal(isJsonModeUnsupportedCached(baseUrl, "gemini-3-flash"), true);
     }
   );
+});
+
+test("runGatewayDiagnostics text probe sends max_tokens: 256 and formats empty HTTP 200 errors without (HTTP ?)", async () => {
+  resetGatewayFeatureCache();
+  const baseUrl = "https://gw-thinking.example.com";
+  const observedMaxTokens = [];
+
+  await withStubbedGlobals(
+    {
+      withLocalhostWindow: true,
+      fetchImpl: async (url, init) => {
+        if (url === "/api/health") {
+          return makeJsonResponse(200, { ok: true, proxy: true, runtime: "python" });
+        }
+        if (url === "/api/proxy/v1/models") {
+          return makeJsonResponse(200, {
+            data: [{ id: "gemini-3-flash" }]
+          });
+        }
+        if (url === "/api/proxy/v1/chat/completions") {
+          const body = JSON.parse(init.body);
+          observedMaxTokens.push(body.max_tokens);
+          return makeJsonResponse(200, {
+            choices: [{ message: { content: "" }, finish_reason: "length" }]
+          });
+        }
+        throw new Error(`Unexpected fetch URL: ${url}`);
+      }
+    },
+    async () => {
+      const diag = await runGatewayDiagnostics({
+        baseUrl,
+        apiKey: "sk-test-key"
+      });
+      assert.deepEqual(observedMaxTokens, [256]);
+      assert.equal(diag.status, "text_probe_failed");
+      assert.equal(diag.message, "텍스트 초안 생성 호출 실패");
+      assert.doesNotMatch(diag.message, /HTTP \?/);
+      assert.match(diag.detail, /응답 텍스트 없음 \(length\)/);
+    }
+  );
+});
+
+test("transcript backup helpers save, load, and clear localStorage cleanly", () => {
+  const store = new Map();
+  const prevLocalStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k)
+  };
+
+  try {
+    assert.equal(loadTranscriptBackup(), null);
+
+    const saved = saveTranscriptBackup({
+      transcriptText: "  평가자: 설계 의도가 무엇인가요?\n피평가자: 상태 분리를 위함입니다.  ",
+      missionMemo: "A3-2 미션",
+      totalActiveSeconds: 1840
+    });
+    assert.ok(saved);
+    assert.equal(saved.transcriptText, "평가자: 설계 의도가 무엇인가요?\n피평가자: 상태 분리를 위함입니다.");
+    assert.equal(saved.missionMemo, "A3-2 미션");
+    assert.equal(saved.totalActiveSeconds, 1840);
+
+    const loaded = loadTranscriptBackup();
+    assert.ok(loaded);
+    assert.equal(loaded.transcriptText, saved.transcriptText);
+    assert.equal(loaded.missionMemo, "A3-2 미션");
+    assert.equal(loaded.totalActiveSeconds, 1840);
+
+    // Saving empty text automatically clears the backup
+    assert.equal(saveTranscriptBackup({ transcriptText: "   " }), null);
+    assert.equal(loadTranscriptBackup(), null);
+
+    saveTranscriptBackup({ transcriptText: "임시 대본", totalActiveSeconds: 60 });
+    assert.ok(loadTranscriptBackup());
+    clearTranscriptBackup();
+    assert.equal(loadTranscriptBackup(), null);
+  } finally {
+    if (prevLocalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prevLocalStorage;
+  }
+});
+
+test("createSpeechController recovers from InvalidStateError on restart, backs off on network errors after speech, and stops after 5 initial network errors", async () => {
+  const prevWindow = globalThis.window;
+  let lastInstance = null;
+  let startAttempts = 0;
+  let throwOnNextStart = false;
+
+  class MockSpeechRecognition {
+    constructor() {
+      this.lang = "";
+      this.continuous = false;
+      this.interimResults = false;
+      lastInstance = this;
+    }
+    start() {
+      startAttempts += 1;
+      if (throwOnNextStart) {
+        throwOnNextStart = false;
+        const err = new Error("InvalidStateError");
+        err.name = "InvalidStateError";
+        throw err;
+      }
+      this.onstart?.();
+    }
+    stop() {}
+    abort() {}
+  }
+
+  globalThis.window = { SpeechRecognition: MockSpeechRecognition };
+
+  try {
+    const statuses = [];
+    const chunks = [];
+    const logs = [];
+    const speech = createSpeechController({
+      onFinalChunk: (txt) => chunks.push(txt),
+      onInterim: () => {},
+      onStatusChange: (mode, text) => statuses.push({ mode, text }),
+      onLog: (msg, level) => logs.push({ msg, level })
+    });
+
+    // 1) Initial 5 consecutive network errors without any prior speech -> stops auto-restart (non-Chrome webview)
+    speech.setActive(true);
+    speech.start();
+    assert.equal(startAttempts, 1);
+
+    for (let i = 1; i <= 5; i++) {
+      lastInstance.onerror({ error: "network" });
+    }
+    assert.equal(statuses[statuses.length - 1].mode, "unsupported");
+    assert.match(statuses[statuses.length - 1].text, /일반 Google Chrome 필요/);
+
+    // 2) Active session with recognized speech -> survives >=3 network errors with warn badge and recovers on next result, plus survives InvalidStateError on onend restart
+    speech.reset();
+    statuses.length = 0;
+    startAttempts = 0;
+
+    speech.setActive(true);
+    speech.start();
+    assert.equal(startAttempts, 1);
+
+    // Simulate recognized speech
+    lastInstance.onresult({
+      resultIndex: 0,
+      results: [{ 0: { transcript: "첫 번째 문장" }, isFinal: true }]
+    });
+    assert.deepEqual(chunks, ["첫 번째 문장"]);
+
+    // Simulate 1-minute Chrome cutoff where first rec.start() throws InvalidStateError
+    throwOnNextStart = true;
+    lastInstance.onend();
+    await new Promise((r) => setTimeout(r, 900));
+    assert.ok(startAttempts >= 3, `Expected retry after InvalidStateError, got startAttempts=${startAttempts}`);
+
+    // Simulate 3 consecutive temporary Wi-Fi network errors during 1-hour session
+    lastInstance.onerror({ error: "network" });
+    lastInstance.onerror({ error: "network" });
+    lastInstance.onerror({ error: "network" });
+    assert.equal(statuses[statuses.length - 1].mode, "warn");
+    assert.match(statuses[statuses.length - 1].text, /네트워크 재연결 중 \(3회\)/);
+
+    // Speech resumes -> badge immediately recovers to active
+    lastInstance.onresult({
+      resultIndex: 0,
+      results: [{ 0: { transcript: "두 번째 문장" }, isFinal: true }]
+    });
+    assert.equal(statuses[statuses.length - 1].mode, "active");
+    assert.equal(statuses[statuses.length - 1].text, "실시간 한국어 받아적기 중");
+
+    speech.stop(false, "대기");
+  } finally {
+    if (prevWindow === undefined) delete globalThis.window;
+    else globalThis.window = prevWindow;
+  }
 });

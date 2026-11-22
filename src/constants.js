@@ -5,6 +5,7 @@ export const STORE_NOTES = "extracted_notes";
 
 export const GATEWAY_BASE_URL_STORAGE = "peer_feedback_gateway_base_url";
 export const GATEWAY_KEY_STORAGE = "peer_feedback_key_gateway";
+export const TRANSCRIPT_BACKUP_STORAGE = "peer_feedback_transcript_backup_v1";
 
 export const SEGMENT_ROTATE_SECONDS = 6 * 60; // 6분 단위 자동 구간 분할 (16kHz 모노 WAV 약 11.5MB < 15MB)
 export const CHUNK_TIMESLICE_MS = 5000; // 5초마다 IndexedDB 백업 기록

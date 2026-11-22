@@ -45,7 +45,8 @@
       <div class="banner-title">중단된 이전 평가 세션 데이터가 브라우저 임시 버퍼에서 발견되었습니다</div>
       <div id="recoveryDesc" class="banner-desc"></div>
       <div class="banner-actions">
-        <button id="btnRecoverProcess" class="btn-primary btn-sm" type="button">복구해 초안 생성 후 음성 폐기</button>
+        <button id="btnRecoverProcess" class="btn-primary btn-sm" type="button">복구해 바로 초안 생성</button>
+        <button id="btnRecoverRestoreOnly" class="btn-secondary btn-sm hidden" type="button">대본 칸으로만 복원 (이어서 녹음·편집)</button>
         <button id="btnRecoverDiscard" class="btn-danger-outline btn-sm" type="button">복구하지 않고 즉시 파기</button>
       </div>
     </section>
@@ -139,9 +140,10 @@
         <div class="studio-top">
           <span id="timerDisplay" class="timer-display">00:00:00</span>
           <div class="sub-metrics">
+            <span id="textModeBatchMetric">모드: <strong>일괄 분석 (종료 시 1회 전송 · 대본 자동 백업)</strong></span>
             <span id="bufferMetricItem" class="hidden">현재 구간 버퍼: <strong id="currentBufferSize">0.00 MB</strong></span>
-            <span>다음 자동 분할: <strong id="nextRotateCountdown">06:00</strong></span>
-            <span>완료 구간: <strong id="completedSegmentCount">0개</strong></span>
+            <span id="rotateCountdownMetricItem" class="hidden">다음 자동 분할: <strong id="nextRotateCountdown">06:00</strong></span>
+            <span id="completedSegmentMetricItem" class="hidden">완료 구간: <strong id="completedSegmentCount">0개</strong></span>
           </div>
         </div>
 
@@ -154,7 +156,7 @@
             <button id="btnStopAndGenerate" class="btn-success" type="button" disabled>■ 평가 종료 및 초안 생성</button>
           </div>
           <div class="controls-secondary">
-            <button id="btnRotateChunk" class="btn-ghost btn-sm" type="button" disabled>구간 중간 요약</button>
+            <button id="btnRotateChunk" class="btn-ghost btn-sm hidden" type="button" disabled>구간 중간 요약</button>
             <button id="btnImportFile" class="btn-ghost btn-sm hidden" type="button">음성 파일 불러오기</button>
             <input id="audioFileInput" type="file" accept="audio/*,.m4a,.mp3,.webm,.wav,.ogg" class="hidden" />
           </div>

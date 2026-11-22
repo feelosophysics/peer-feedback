@@ -425,7 +425,7 @@ async function runTextCompatibilityProbe({
       audioPayload: null,
       options: {
         useJsonMode: true,
-        maxTokens: 16,
+        maxTokens: 256,
         onJsonModeFallback: () => {
           jsonModeFallbackUsed = true;
         }
@@ -497,6 +497,7 @@ async function runTextCompatibilityProbe({
       };
     }
     const prefix = includeAudioProbe ? "오디오 입력 미지원 확인 후 " : "";
+    const statusSuffix = textErr.status ? ` (HTTP ${textErr.status})` : "";
     return {
       status: "text_probe_failed",
       httpStatus: textErr.status || null,
@@ -505,7 +506,7 @@ async function runTextCompatibilityProbe({
       probeModel,
       textProbeOk: false,
       textProbeModel,
-      message: `텍스트 초안 생성 호출 실패 (HTTP ${textErr.status || "?"})`,
+      message: `텍스트 초안 생성 호출 실패${statusSuffix}`,
       detail: `${prefix}${textProbeModel} 텍스트 생성 테스트가 실패했습니다 (${textErr.message}).`,
       nextAction: "고급 설정에서 다른 모델(예: gpt-5.4-mini, claude-sonnet-4)을 선택하거나 키 권한을 확인해 주세요."
     };
@@ -601,7 +602,7 @@ export async function runGatewayDiagnostics({ baseUrl, apiKey, includeAudioProbe
       modelId: probeModel,
       promptText: "Reply with OK.",
       audioPayload: { base64: silentB64, cleanMime: "audio/wav" },
-      options: { useJsonMode: false, maxTokens: 16 }
+      options: { useJsonMode: false, maxTokens: 256 }
     });
 
     return {

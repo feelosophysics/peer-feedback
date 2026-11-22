@@ -821,6 +821,12 @@ canvas#waveformCanvas {
   color: #b45309;
 }
 
+.speech-badge.warn {
+  background: var(--warn-soft);
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
 .interim-line {
   font-size: 0.8rem;
   color: var(--primary);

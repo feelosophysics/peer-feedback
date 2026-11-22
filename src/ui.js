@@ -13,6 +13,7 @@ export function collectElements() {
     recoveryBanner: document.getElementById("recoveryBanner"),
     recoveryDesc: document.getElementById("recoveryDesc"),
     btnRecoverProcess: document.getElementById("btnRecoverProcess"),
+    btnRecoverRestoreOnly: document.getElementById("btnRecoverRestoreOnly"),
     btnRecoverDiscard: document.getElementById("btnRecoverDiscard"),
     globalError: document.getElementById("globalError"),
 
@@ -34,9 +35,12 @@ export function collectElements() {
 
     timerDisplay: document.getElementById("timerDisplay"),
     recStatusBadge: document.getElementById("recStatusBadge"),
+    textModeBatchMetric: document.getElementById("textModeBatchMetric"),
     bufferMetricItem: document.getElementById("bufferMetricItem"),
     currentBufferSize: document.getElementById("currentBufferSize"),
+    rotateCountdownMetricItem: document.getElementById("rotateCountdownMetricItem"),
     nextRotateCountdown: document.getElementById("nextRotateCountdown"),
+    completedSegmentMetricItem: document.getElementById("completedSegmentMetricItem"),
     completedSegmentCount: document.getElementById("completedSegmentCount"),
     waveformCanvas: document.getElementById("waveformCanvas"),
 
