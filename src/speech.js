@@ -1,4 +1,6 @@
-export function createSpeechController({ onFinalChunk, onInterim, onStatusChange, onLog }) {
+// onFinalChunk(text, { elapsedSec })로 확정된 인식 결과와 녹음 시작 후 경과 초를 넘긴다.
+// getElapsedSeconds를 주면 그 값(일시정지 시간을 뺀 녹음 시간)을, 없으면 첫 start() 이후 실제 경과 시간을 쓴다.
+export function createSpeechController({ onFinalChunk, onInterim, onStatusChange, onLog, getElapsedSeconds }) {
   let recognition = null;
   let allowRestart = false;
   let networkErrorCount = 0;
@@ -10,6 +12,16 @@ export function createSpeechController({ onFinalChunk, onInterim, onStatusChange
   let currentSegmentTranscript = "";
   let committedSegments = {};
   let isRecordingActive = false;
+  let startedAtMs = null;
+
+  function elapsedNow() {
+    if (typeof getElapsedSeconds === "function") {
+      const v = Number(getElapsedSeconds());
+      if (Number.isFinite(v)) return Math.max(0, v);
+    }
+    if (startedAtMs === null) return 0;
+    return Math.max(0, (Date.now() - startedAtMs) / 1000);
+  }
 
   function clearRestartTimer() {
     if (restartTimer) {
@@ -49,6 +61,7 @@ export function createSpeechController({ onFinalChunk, onInterim, onStatusChange
       return;
     }
 
+    if (startedAtMs === null) startedAtMs = Date.now();
     allowRestart = true;
     networkErrorCount = 0;
     lastErrorCode = "";
@@ -88,7 +101,7 @@ export function createSpeechController({ onFinalChunk, onInterim, onStatusChange
           currentSegmentTranscript = currentSegmentTranscript
             ? `${currentSegmentTranscript}\n${txt}`
             : txt;
-          onFinalChunk?.(txt);
+          onFinalChunk?.(txt, { elapsedSec: elapsedNow() });
         } else {
           interim = interim ? `${interim} ${txt}` : txt;
         }
@@ -170,7 +183,7 @@ export function createSpeechController({ onFinalChunk, onInterim, onStatusChange
         currentSegmentTranscript = currentSegmentTranscript
           ? `${currentSegmentTranscript}\n${tail}`
           : tail;
-        onFinalChunk?.(tail);
+        onFinalChunk?.(tail, { elapsedSec: elapsedNow() });
       }
     }
     lastInterim = "";
@@ -197,6 +210,7 @@ export function createSpeechController({ onFinalChunk, onInterim, onStatusChange
     currentSegmentTranscript = "";
     lastInterim = "";
     committedSegments = {};
+    startedAtMs = null;
     networkErrorCount = 0;
     hasEverReceivedSpeech = false;
     lastErrorCode = "";

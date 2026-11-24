@@ -178,10 +178,21 @@ export function clearTranscriptBackup() {
   }
 }
 
+function cleanTimedLines(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x) => x && Number.isFinite(Number(x.t)) && String(x.text || "").trim())
+    .map((x) => ({ t: Math.round(Number(x.t) * 10) / 10, text: String(x.text).trim() }));
+}
+
+// 백업 형식: { transcriptText, missionMemo, totalActiveSeconds, updatedAt }
+// 추가 필드(없어도 됨): timedLines [{ t: 녹음 경과 초, text }], checklistText
 export function saveTranscriptBackup({
   transcriptText = "",
   missionMemo = "",
-  totalActiveSeconds = 0
+  totalActiveSeconds = 0,
+  timedLines = [],
+  checklistText = ""
 } = {}) {
   const cleanText = String(transcriptText || "").trim();
   if (!cleanText) {
@@ -192,6 +203,8 @@ export function saveTranscriptBackup({
     transcriptText: cleanText,
     missionMemo: String(missionMemo || ""),
     totalActiveSeconds: Number(totalActiveSeconds) || 0,
+    timedLines: cleanTimedLines(timedLines),
+    checklistText: String(checklistText || ""),
     updatedAt: Date.now()
   };
   try {
@@ -216,6 +229,8 @@ export function loadTranscriptBackup() {
       transcriptText: cleanText,
       missionMemo: String(parsed?.missionMemo || ""),
       totalActiveSeconds: Number(parsed?.totalActiveSeconds) || 0,
+      timedLines: cleanTimedLines(parsed?.timedLines),
+      checklistText: String(parsed?.checklistText || ""),
       updatedAt: Number(parsed?.updatedAt) || 0
     };
   } catch {

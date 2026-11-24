@@ -12,7 +12,7 @@
     <header class="topbar">
       <div class="topbar-title-wrap">
         <h1>동료평가 상호 피드백</h1>
-        <p class="topbar-sub">음성 대화 녹음 → 화자별 핵심 요약 · 양쪽 피드백 초안 생성 · 완료 즉시 음성 폐기</p>
+        <p class="topbar-sub">대화 녹음·받아적기 → 대화 포인트 · 양쪽 피드백 초안 · 대화 돌아보기 · 완료 즉시 음성 폐기</p>
       </div>
       <button id="connectionChip" class="conn-chip" type="button" title="연결 설정 보기">확인 중...</button>
     </header>
@@ -132,8 +132,13 @@
       </div>
 
       <div class="memo-row">
-        <label for="missionMemoInput">미션 · 메모 (선택)</label>
-        <input id="missionMemoInput" type="text" placeholder="예: A3-2 구현 · 평가자: 나 / 동료: 홍길동 (비워두면 대화로 자동 추론)" />
+        <label for="missionMemoInput">메모 (선택)</label>
+        <input id="missionMemoInput" type="text" placeholder="미션명, 또는 상대가 말한 미션 해석 한 줄 · 상대 이름을 적으면 초안에서 불러 줍니다" />
+      </div>
+
+      <div class="memo-row memo-row-top">
+        <label for="checklistInput">체크 항목 (선택)</label>
+        <textarea id="checklistInput" rows="2" placeholder="대화에서 다뤘는지 돌아보고 싶은 것을 한 줄에 하나씩 (비워 두면 무시)&#10;예: 예외 처리를 왜 그렇게 했는지 묻기"></textarea>
       </div>
 
       <div class="studio-stage">
@@ -204,17 +209,17 @@
           <div class="field">
             <label for="toneSelect">피드백 말투</label>
             <select id="toneSelect">
-              <option value="polite_haeyo">정중한 해요체 (기본)</option>
-              <option value="formal_hapsyo">격식체 (~했습니다)</option>
-              <option value="plain_concise">담백한 평어·개조식</option>
+              <option value="warm_casual" selected>다정한 대화체 (기본)</option>
+              <option value="polite_haeyo">정중한 해요체</option>
+              <option value="plain_bullets">담백한 개조식</option>
             </select>
           </div>
           <div class="field">
             <label for="lengthSelect">피드백 분량</label>
             <select id="lengthSelect">
-              <option value="short">짧게 (3–4문장)</option>
-              <option value="medium" selected>기본 (1–2문단)</option>
-              <option value="long">길게 (2–3문단 상세)</option>
+              <option value="short">짧게 (약 300자)</option>
+              <option value="medium" selected>기본 (대화 근거만큼 · 약 400–900자)</option>
+              <option value="long">길게 (2000자 이내 상세)</option>
             </select>
           </div>
           <button id="btnRegenerateDrafts" class="btn-primary" type="button">선택 조건으로 다시 다듬기</button>
@@ -223,7 +228,7 @@
 
       <div class="card">
         <div class="card-header">
-          <h2 class="card-title">1단 · 화자별 핵심 대화 포인트</h2>
+          <h2 class="card-title">1단 · 대화 포인트</h2>
           <span class="help-text">반영할 항목을 체크/추가한 뒤 위 '다시 다듬기'를 누르세요</span>
         </div>
 
@@ -235,11 +240,13 @@
             <option value="피평가자">피평가자</option>
             <option value="공통">공통</option>
           </select>
-          <select id="customPointCategory" style="width: 145px; flex-shrink: 0;">
-            <option value="칭찬/강점">칭찬/강점</option>
-            <option value="개선제안/놓친점">개선제안/놓친점</option>
-            <option value="질문/검증">질문/검증</option>
-            <option value="구현설명">구현설명</option>
+          <select id="customPointKind" style="width: 120px; flex-shrink: 0;">
+            <option value="설명">설명</option>
+            <option value="질문">질문</option>
+            <option value="함께 해결">함께 해결</option>
+            <option value="배운 점">배운 점</option>
+            <option value="개선">개선</option>
+            <option value="여담">여담</option>
           </select>
           <input id="customPointInput" type="text" placeholder="추가할 포인트를 적고 Enter 또는 추가 클릭" />
           <button id="btnAddCustomPoint" class="btn-secondary" type="button">추가</button>
@@ -254,7 +261,7 @@
           </div>
           <textarea id="reviewerDraftTextarea" class="draft-textarea" placeholder="평가자가 피평가자에게 남길 피드백 초안"></textarea>
           <div class="draft-footer">
-            <span id="reviewerCharCount">0자 (공백 제외 0자)</span>
+            <span id="reviewerCharCount">0/2000자 (공백 제외 0자)</span>
             <span>입력란에 붙여넣기 전 직접 다듬어 주세요</span>
           </div>
         </div>
@@ -266,10 +273,19 @@
           </div>
           <textarea id="revieweeDraftTextarea" class="draft-textarea" placeholder="피평가자가 평가자에게 남길 감사·상호 피드백 초안"></textarea>
           <div class="draft-footer">
-            <span id="revieweeCharCount">0자 (공백 제외 0자)</span>
+            <span id="revieweeCharCount">0/2000자 (공백 제외 0자)</span>
             <span>동료에게 전달하거나 상호 피드백에 활용하세요</span>
           </div>
         </div>
+      </div>
+
+      <div id="reflectionCard" class="card reflection-card">
+        <div class="card-header">
+          <h2 class="card-title">대화 돌아보기 <span class="help-text">나만 보는 참고 · 초안에는 들어가지 않습니다</span></h2>
+          <span class="approx-badge">문맥 추정 · 근사치</span>
+        </div>
+        <p class="help-text">대본에는 화자 표시가 없어서 모델이 문맥으로 화자·질문·미션 관련도를 추정했고, 숫자는 브라우저가 글자 수(공백 제외)로 셌습니다. 다음 평가를 준비할 때 흐름을 훑어보는 용도로만 쓰세요.</p>
+        <div id="reflectionBody" class="reflection-body"></div>
       </div>
     </section>
 

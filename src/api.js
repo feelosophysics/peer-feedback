@@ -6,8 +6,110 @@ import {
 import {
   blobToBase64,
   convertAudioBlobToWav16kMono,
-  createSilentWavBlob
+  createToneWavBlob
 } from "./audio.js";
+
+// 음성 전달 점검: Gemini는 음성 1초를 약 32토큰으로 센다.
+export const AUDIO_TOKENS_PER_SECOND = 32;
+export const AUDIO_PROBE_SECONDS = 2;
+const AUDIO_PROBE_PROMPT =
+  "첨부된 오디오에 들리는 소리를 한 단어로 답하세요. 오디오가 첨부되지 않았다면 '없음'이라고만 답하세요.";
+
+/**
+ * 음성 없는 대조 요청과 음성 포함 요청의 prompt_tokens 차이로 음성 전달 여부를 판정한다.
+ * - delivered: 음성 길이에 맞게 토큰이 늘었다
+ * - dropped: 요청은 통과했지만 토큰이 거의 늘지 않았다(게이트웨이가 음성을 버림)
+ * - inconclusive: usage 정보가 없어 판정할 수 없다
+ */
+export function judgeAudioProbe({ controlTokens, audioTokens, audioSeconds = AUDIO_PROBE_SECONDS }) {
+  const expected = Math.round(audioSeconds * AUDIO_TOKENS_PER_SECOND);
+  const c = Number.isFinite(controlTokens) && controlTokens > 0 ? controlTokens : null;
+  const a = Number.isFinite(audioTokens) && audioTokens > 0 ? audioTokens : null;
+  if (c === null || a === null) {
+    return { verdict: "inconclusive", controlTokens: c, audioTokens: a, diff: null, expected };
+  }
+  const diff = a - c;
+  const threshold = Math.max(10, Math.round(expected * 0.3));
+  return { verdict: diff >= threshold ? "delivered" : "dropped", controlTokens: c, audioTokens: a, diff, expected };
+}
+
+/**
+ * 게이트웨이가 input_audio를 조용히 버려도 HTTP 200이 올 수 있으므로,
+ * 같은 문장을 음성 없이/있이(2초 신호음) 보내 usage.prompt_tokens가 음성 길이만큼 늘었는지로 판정한다.
+ * 요청이 실패하면 err.probeStage("control" | "audio")를 붙여 그대로 던진다.
+ */
+export async function probeAudioDelivery({ baseUrl, apiKey, localProxyAvailable, modelId }) {
+  const toneB64 = await blobToBase64(createToneWavBlob(AUDIO_PROBE_SECONDS, TARGET_WAV_SAMPLE_RATE));
+  const probeOptions = { useJsonMode: false, maxTokens: 256, temperature: 0, allowEmptyText: true };
+  const send = async (stage, audioPayload) => {
+    try {
+      return await callGatewayOpenAiEndpointDetailed({
+        baseUrl,
+        apiKey,
+        localProxyAvailable,
+        modelId,
+        prompt: AUDIO_PROBE_PROMPT,
+        audioPayload,
+        options: probeOptions
+      });
+    } catch (err) {
+      err.probeStage = stage;
+      throw err;
+    }
+  };
+  const control = await send("control", null);
+  const withAudio = await send("audio", { base64: toneB64, cleanMime: "audio/wav" });
+  return judgeAudioProbe({
+    controlTokens: control.usage?.prompt_tokens,
+    audioTokens: withAudio.usage?.prompt_tokens,
+    audioSeconds: AUDIO_PROBE_SECONDS
+  });
+}
+
+// 판정 보류(usage 없음)가 나온 게이트웨이·모델은 구간마다 다시 점검하지 않는다.
+const audioProbeInconclusiveKeys = new Set();
+
+/**
+ * 녹음 전송 직전 점검. 돌려주는 값:
+ * "delivered" | "dropped" | "rejected"(음성 요청 거부) | "inconclusive"(판정 불가 — 기존처럼 전송은 시도)
+ */
+export async function checkAudioDeliveryBeforeSend({
+  baseUrl,
+  apiKey,
+  localProxyAvailable,
+  selectedModel,
+  customModel = "",
+  syncedModels = [],
+  onLog,
+  label = "audio"
+}) {
+  let modelId;
+  try {
+    modelId = buildModelCandidates({ selectedModel, customModel, syncedModels, requireAudio: true })[0];
+  } catch {
+    return "inconclusive";
+  }
+  if (!modelId) return "inconclusive";
+  const cacheKey = getJsonModeCacheKey(baseUrl, modelId);
+  if (audioProbeInconclusiveKeys.has(cacheKey)) return "inconclusive";
+
+  onLog?.(`${label}: 녹음을 보내기 전에 음성 전달 점검 중 (${modelId} · 2초 신호음과 토큰 수 비교)`, "info");
+  try {
+    const judged = await probeAudioDelivery({ baseUrl, apiKey, localProxyAvailable, modelId });
+    if (judged.verdict === "inconclusive") audioProbeInconclusiveKeys.add(cacheKey);
+    onLog?.(
+      judged.diff === null
+        ? `${label}: 음성 전달 판정 보류 — 게이트웨이가 토큰 사용량을 알려주지 않음`
+        : `${label}: 음성 전달 점검 ${judged.verdict === "delivered" ? "통과" : "실패"} — 토큰 차이 ${judged.diff} (예상 약 ${judged.expected})`,
+      judged.verdict === "delivered" ? "ok" : "warn"
+    );
+    return judged.verdict;
+  } catch (err) {
+    if (err.probeStage === "audio" && err.isAudioRejected) return "rejected";
+    // 키·네트워크 오류 등은 실제 전송에서 원래 방식대로 드러나게 둔다.
+    return "inconclusive";
+  }
+}
 import {
   formatBytes,
   isGatewayAudioCapableModel,
@@ -27,12 +129,15 @@ function getJsonModeCacheKey(baseUrl, modelId) {
 export function resetGatewayFeatureCache(baseUrl = null) {
   if (!baseUrl) {
     jsonModeUnsupportedKeys.clear();
+    audioProbeInconclusiveKeys.clear();
     return;
   }
   const prefix = `${String(baseUrl).trim()}::`;
-  for (const key of jsonModeUnsupportedKeys) {
-    if (key.startsWith(prefix)) {
-      jsonModeUnsupportedKeys.delete(key);
+  for (const cache of [jsonModeUnsupportedKeys, audioProbeInconclusiveKeys]) {
+    for (const key of cache) {
+      if (key.startsWith(prefix)) {
+        cache.delete(key);
+      }
     }
   }
 }
@@ -195,12 +300,55 @@ export async function fetchAvailableModels({ baseUrl, apiKey, localProxyAvailabl
   }
 }
 
-export async function callGatewayOpenAiEndpoint({
+/**
+ * 프롬프트를 chat messages 배열로 바꾼다.
+ * - 문자열: user 메시지 하나
+ * - { system, user }: 역할·규칙은 system, 자료는 user
+ * 음성이 있으면 user 메시지에 input_audio 파트를 덧붙인다.
+ */
+export function buildChatMessages(prompt, audioPayload = null) {
+  const isSplit = prompt && typeof prompt === "object";
+  const systemText = isSplit ? String(prompt.system || "").trim() : "";
+  const userText = isSplit ? String(prompt.user || "").trim() : String(prompt || "");
+
+  const userContent = audioPayload
+    ? [
+        { type: "text", text: userText },
+        {
+          type: "input_audio",
+          input_audio: {
+            data: audioPayload.base64,
+            format: mimeToAudioFormat(audioPayload.cleanMime)
+          }
+        }
+      ]
+    : userText;
+
+  const messages = [];
+  if (systemText) messages.push({ role: "system", content: systemText });
+  messages.push({ role: "user", content: userContent });
+  return messages;
+}
+
+function extractMessageText(json) {
+  const msgContent = json?.choices?.[0]?.message?.content;
+  return Array.isArray(msgContent)
+    ? msgContent.map((c) => c.text || "").join("")
+    : (msgContent || "");
+}
+
+export async function callGatewayOpenAiEndpoint(args) {
+  const { text } = await callGatewayOpenAiEndpointDetailed(args);
+  return text;
+}
+
+/** callGatewayOpenAiEndpoint와 같지만 { text, usage, finishReason }을 돌려준다. */
+export async function callGatewayOpenAiEndpointDetailed({
   baseUrl,
   apiKey,
   localProxyAvailable,
   modelId,
-  promptText,
+  prompt,
   audioPayload = null,
   options = {}
 }) {
@@ -211,23 +359,10 @@ export async function callGatewayOpenAiEndpoint({
   const isJsonFallbackRetry = Boolean(options._isJsonFallbackRetry);
   const maxTokens = options.maxTokens ?? null;
 
-  const content = audioPayload
-    ? [
-        { type: "text", text: promptText },
-        {
-          type: "input_audio",
-          input_audio: {
-            data: audioPayload.base64,
-            format: mimeToAudioFormat(audioPayload.cleanMime)
-          }
-        }
-      ]
-    : promptText;
-
   const bodyObj = {
     model: modelId,
-    temperature: 0.3,
-    messages: [{ role: "user", content }]
+    temperature: options.temperature ?? 0.3,
+    messages: buildChatMessages(prompt, audioPayload)
   };
   if (effectiveUseJsonMode) {
     bodyObj.response_format = { type: "json_object" };
@@ -254,18 +389,16 @@ export async function callGatewayOpenAiEndpoint({
 
   if (res.ok) {
     const json = await res.json();
-    const msgContent = json?.choices?.[0]?.message?.content;
-    const textPart = Array.isArray(msgContent)
-      ? msgContent.map((c) => c.text || "").join("")
-      : (msgContent || "");
-    if (!textPart) {
-      throw new Error(`응답 텍스트 없음 (${json?.choices?.[0]?.finish_reason || "empty"})`);
+    const textPart = extractMessageText(json);
+    const finishReason = json?.choices?.[0]?.finish_reason || "";
+    if (!textPart && !options.allowEmptyText) {
+      throw new Error(`응답 텍스트 없음 (${finishReason || "empty"})`);
     }
     if (isJsonFallbackRetry) {
       jsonModeUnsupportedKeys.add(cacheKey);
       options.onJsonModeFallback?.(modelId);
     }
-    return textPart;
+    return { text: textPart, usage: json?.usage || null, finishReason };
   }
 
   const errText = await res.text();
@@ -279,12 +412,12 @@ export async function callGatewayOpenAiEndpoint({
       allowAudioJsonFallback
     })
   ) {
-    return await callGatewayOpenAiEndpoint({
+    return await callGatewayOpenAiEndpointDetailed({
       baseUrl,
       apiKey,
       localProxyAvailable,
       modelId,
-      promptText,
+      prompt,
       audioPayload,
       options: {
         ...options,
@@ -313,7 +446,7 @@ export async function callLLMWithFallback({
   selectedModel,
   customModel = "",
   syncedModels = [],
-  promptText,
+  prompt,
   audioPayload = null,
   allowAudioJsonFallback = false,
   onLog,
@@ -325,6 +458,10 @@ export async function callLLMWithFallback({
   }
   if (!apiKey) {
     throw new Error("게이트웨이 OpenAI 호환 Virtual Key를 먼저 입력해 주세요.");
+  }
+  const hasPrompt = prompt && (typeof prompt === "string" ? prompt.trim() : String(prompt.user || "").trim());
+  if (!hasPrompt) {
+    throw new Error("내부 오류: 모델에 보낼 프롬프트가 비어 있습니다.");
   }
 
   const candidates = buildModelCandidates({
@@ -343,7 +480,7 @@ export async function callLLMWithFallback({
         apiKey,
         localProxyAvailable,
         modelId,
-        promptText,
+        prompt,
         audioPayload,
         options: {
           allowAudioJsonFallback,
@@ -405,12 +542,20 @@ async function runTextCompatibilityProbe({
   probeModel,
   textProbeModel,
   includeAudioProbe,
+  audioOutcome = "rejected", // rejected(요청 거부) | dropped(통과했지만 음성 누락) | not_tested(대조 요청부터 실패)
+  audioProbe = null,
+  audioNote = "",
   onProgress
 }) {
+  const audioStepNote = {
+    rejected: "오디오 미지원 확인 — ",
+    dropped: "음성 누락 확인 — ",
+    not_tested: ""
+  }[audioOutcome] || "";
   onProgress?.({
     step: 3,
     stepText: includeAudioProbe
-      ? `3/3 · 오디오 미지원 확인 — 텍스트 초안 생성 점검 중 (${textProbeModel})...`
+      ? `3/3 · ${audioStepNote}텍스트 초안 생성 점검 중 (${textProbeModel})...`
       : `3/3 · 텍스트 초안 생성 점검 중 (${textProbeModel})...`
   });
 
@@ -421,7 +566,7 @@ async function runTextCompatibilityProbe({
       apiKey,
       localProxyAvailable: true,
       modelId: textProbeModel,
-      promptText: 'Reply with JSON: {"ok":true}',
+      prompt: 'Reply with JSON: {"ok":true}',
       audioPayload: null,
       options: {
         useJsonMode: true,
@@ -434,16 +579,35 @@ async function runTextCompatibilityProbe({
 
     if (includeAudioProbe) {
       const jsonFallbackNote = jsonModeFallbackUsed ? " · JSON 모드 미지원 자동 우회 적용" : "";
-      return {
-        status: "audio_unsupported",
+      const common = {
         runtime,
         syncedModels,
         probeModel,
         textProbeOk: true,
         textProbeModel,
         jsonModeSupported: !jsonModeFallbackUsed,
-        message: "텍스트 초안 생성 정상 · 게이트웨이 오디오 직접 입력 미지원",
-        detail: `게이트웨이가 16kHz WAV 직접 전송을 받지 않지만, ${textProbeModel} 텍스트 초안 생성은 정상 동작합니다${jsonFallbackNote}.`,
+        audioProbe
+      };
+      if (audioOutcome === "not_tested") {
+        return {
+          ...common,
+          status: "audio_inconclusive",
+          message: "텍스트 초안 생성 정상 · 음성 전달 여부는 판정 보류",
+          detail: `음성 점검용 대조 요청이 실패해 음성 전달 여부를 확인하지 못했습니다. ${textProbeModel} 텍스트 초안 생성은 정상 동작합니다${jsonFallbackNote}.`,
+          nextAction: "기본 '실시간 받아적기' 모드로 쓰거나, 터미널에서 node tools/audio-probe.mjs로 다시 점검해 보세요."
+        };
+      }
+      const reason = audioOutcome === "dropped"
+        ? `게이트웨이가 음성 포함 요청을 받긴 했지만 음성이 모델까지 전달되지 않았습니다(${audioNote || "토큰 증가 없음"}).`
+        : "게이트웨이가 16kHz WAV 직접 전송을 받지 않습니다.";
+      return {
+        ...common,
+        status: "audio_unsupported",
+        audioDropped: audioOutcome === "dropped",
+        message: audioOutcome === "dropped"
+          ? "텍스트 초안 생성 정상 · 음성이 모델까지 전달되지 않음"
+          : "텍스트 초안 생성 정상 · 게이트웨이 오디오 직접 입력 미지원",
+        detail: `${reason} ${textProbeModel} 텍스트 초안 생성은 정상 동작합니다${jsonFallbackNote}.`,
         nextAction: "일반 Google Chrome에서 그대로 '녹음 시작'을 누르면 실시간 한국어 받아적기로 자동 전환되어 초안을 만듭니다."
       };
     }
@@ -496,7 +660,7 @@ async function runTextCompatibilityProbe({
         nextAction: "인터넷 연결 또는 게이트웨이 Base URL을 확인해 주세요."
       };
     }
-    const prefix = includeAudioProbe ? "오디오 입력 미지원 확인 후 " : "";
+    const prefix = includeAudioProbe && audioOutcome !== "not_tested" ? "오디오 입력 미지원 확인 후 " : "";
     const statusSuffix = textErr.status ? ` (HTTP ${textErr.status})` : "";
     return {
       status: "text_probe_failed",
@@ -589,32 +753,58 @@ export async function runGatewayDiagnostics({ baseUrl, apiKey, includeAudioProbe
     });
   }
 
-  onProgress?.({ step: 3, stepText: `3/3 · 16kHz WAV 오디오 입력 테스트 중 (${probeModel})...` });
+  onProgress?.({
+    step: 3,
+    stepText: `3/3 · 음성 전달 점검 중 (${probeModel}) — 음성 없는 요청과 토큰 수 비교...`
+  });
 
-  const silentWav = createSilentWavBlob(0.4, TARGET_WAV_SAMPLE_RATE);
-  const silentB64 = await blobToBase64(silentWav);
+  const textProbeArgs = { baseUrl, apiKey, runtime: proxy.runtime, syncedModels, probeModel, textProbeModel, onProgress };
 
   try {
-    await callGatewayOpenAiEndpoint({
-      baseUrl,
-      apiKey,
-      localProxyAvailable: true,
-      modelId: probeModel,
-      promptText: "Reply with OK.",
-      audioPayload: { base64: silentB64, cleanMime: "audio/wav" },
-      options: { useJsonMode: false, maxTokens: 256 }
-    });
+    const judged = await probeAudioDelivery({ baseUrl, apiKey, localProxyAvailable: true, modelId: probeModel });
+    const tokenNote = judged.diff === null
+      ? "게이트웨이가 토큰 사용량(usage)을 돌려주지 않음"
+      : `음성 없는 요청 ${judged.controlTokens}토큰 → 음성 ${AUDIO_PROBE_SECONDS}초 포함 ${judged.audioTokens}토큰 (차이 ${judged.diff}, 예상 약 ${judged.expected})`;
+
+    if (judged.verdict === "delivered") {
+      return {
+        status: "audio_supported",
+        runtime: proxy.runtime,
+        syncedModels,
+        probeModel,
+        audioProbe: judged,
+        message: "연결 및 음성 직접 분석 준비 완료",
+        detail: `로컬 프록시(${proxy.runtime}) · OpenAI 호환 키 · ${probeModel}에 음성이 실제로 전달됩니다. ${tokenNote}.`,
+        nextAction: "이제 아래 '녹음 시작' 버튼을 눌러 동료평가 대화를 바로 녹음하세요."
+      };
+    }
+
+    if (judged.verdict === "dropped") {
+      return await runTextCompatibilityProbe({
+        ...textProbeArgs,
+        includeAudioProbe: true,
+        audioOutcome: "dropped",
+        audioProbe: judged,
+        audioNote: tokenNote
+      });
+    }
 
     return {
-      status: "audio_supported",
+      status: "audio_inconclusive",
       runtime: proxy.runtime,
       syncedModels,
       probeModel,
-      message: "연결 및 음성 직접 분석 준비 완료",
-      detail: `로컬 프록시(${proxy.runtime}) · OpenAI 호환 키 · ${probeModel} 16kHz WAV 오디오 입력이 정상 동작합니다.`,
-      nextAction: "이제 아래 '녹음 시작' 버튼을 눌러 동료평가 대화를 바로 녹음하세요."
+      textProbeOk: true,
+      audioProbe: judged,
+      message: "텍스트 연결 정상 · 음성 전달 여부는 판정 보류",
+      detail: `음성 포함 요청은 통과했지만 ${tokenNote}이라 음성이 모델까지 갔는지 확인할 수 없습니다.`,
+      nextAction: "기본 '실시간 받아적기' 모드로 쓰거나, 터미널에서 node tools/audio-probe.mjs로 받아적기 기반 점검을 해 보세요."
     };
   } catch (err) {
+    if (err.probeStage === "control") {
+      // 음성 없는 요청부터 실패하면 텍스트 점검 경로에서 원인(키·네트워크·모델)을 가린다.
+      return await runTextCompatibilityProbe({ ...textProbeArgs, includeAudioProbe: true, audioOutcome: "not_tested" });
+    }
     if (isOpenAiProtocolDisallowedError(err)) {
       return {
         status: "wrong_key_protocol",
@@ -641,16 +831,7 @@ export async function runGatewayDiagnostics({ baseUrl, apiKey, includeAudioProbe
     }
 
     if (err.isAudioRejected || [400, 415, 422, 501].includes(err.status)) {
-      return await runTextCompatibilityProbe({
-        baseUrl,
-        apiKey,
-        runtime: proxy.runtime,
-        syncedModels,
-        probeModel,
-        textProbeModel,
-        includeAudioProbe: true,
-        onProgress
-      });
+      return await runTextCompatibilityProbe({ ...textProbeArgs, includeAudioProbe: true, audioOutcome: "rejected" });
     }
 
     if (isNetworkOrCorsError(err)) {
@@ -681,8 +862,8 @@ export async function runGatewayDiagnostics({ baseUrl, apiKey, includeAudioProbe
 export async function sendAudioOrTranscriptAndDispose({
   blob,
   rawMime,
-  promptTextAudio,
-  promptTextTranscript,
+  promptAudio,
+  promptTranscript,
   label,
   transcriptText,
   uploadMode,
@@ -722,7 +903,7 @@ export async function sendAudioOrTranscriptAndDispose({
       selectedModel,
       customModel,
       syncedModels,
-      promptText: promptTextTranscript,
+      prompt: promptTranscript,
       audioPayload: null,
       onLog,
       onModelUsed,
@@ -747,7 +928,7 @@ export async function sendAudioOrTranscriptAndDispose({
       selectedModel,
       customModel,
       syncedModels,
-      promptText: promptTextTranscript,
+      prompt: promptTranscript,
       audioPayload: null,
       onLog,
       onModelUsed,
@@ -774,7 +955,7 @@ export async function sendAudioOrTranscriptAndDispose({
       selectedModel,
       customModel,
       syncedModels,
-      promptText: promptTextTranscript,
+      prompt: promptTranscript,
       audioPayload: null,
       onLog,
       onModelUsed,
@@ -791,7 +972,7 @@ export async function sendAudioOrTranscriptAndDispose({
       selectedModel,
       customModel,
       syncedModels,
-      promptText: promptTextTranscript,
+      prompt: promptTranscript,
       audioPayload: null,
       onLog,
       onModelUsed,
@@ -799,7 +980,54 @@ export async function sendAudioOrTranscriptAndDispose({
     });
   }
 
-  // 4) 표준 16kHz 모노 WAV 변환 후 인라인 전송 시도
+  // 4) 음성 전달 여부를 아직 모르면, 실제 녹음을 보내기 전에 짧은 신호음으로 토큰 비교 점검을 한다.
+  //    HTTP 200만 보고 '지원됨'으로 믿으면, 게이트웨이가 음성을 버린 채 대본·메모만으로 지어낸 결과를 받을 수 있다.
+  let deliveryUnverified = false;
+  if (gatewayAudioSupport === "unknown") {
+    const check = await checkAudioDeliveryBeforeSend({
+      baseUrl,
+      apiKey,
+      localProxyAvailable,
+      selectedModel,
+      customModel,
+      syncedModels,
+      onLog,
+      label
+    });
+    if (check === "delivered") {
+      onAudioSupportDetected?.("supported");
+    } else if (check === "dropped" || check === "rejected") {
+      blob = null;
+      onAudioSupportDetected?.("unsupported");
+      const why = check === "dropped"
+        ? "게이트웨이가 음성을 받긴 하지만 모델까지 전달하지 않아(토큰 증가 없음)"
+        : "게이트웨이가 오디오 직접 입력을 받지 않아";
+      if (uploadMode !== "audio_only_force" && cleanTranscript) {
+        onLog?.(`${label}: ${why} 로컬 음성을 폐기하고 실시간 대본(${cleanTranscript.length}자)으로 자동 전환합니다.`, "warn");
+        return await callLLMWithFallback({
+          baseUrl,
+          apiKey,
+          localProxyAvailable,
+          selectedModel,
+          customModel,
+          syncedModels,
+          prompt: promptTranscript,
+          audioPayload: null,
+          onLog,
+          onModelUsed,
+          onProtocolDetected
+        });
+      }
+      throw new Error(
+        `${why} 음성으로 분석할 수 없습니다. 백업 대본도 비어 있습니다.\n` +
+        `일반 Google Chrome에서 녹음해 실시간 받아적기가 동작하게 하거나 아래 보조 대본 칸에 내용을 입력해 주세요.`
+      );
+    } else {
+      deliveryUnverified = true;
+    }
+  }
+
+  // 5) 표준 16kHz 모노 WAV 변환 후 인라인 전송 시도
   const originalMime = normalizeAudioMimeType(rawMime || blob.type);
   const wavConverted = await convertAudioBlobToWav16kMono(blob, (msg) => onLog?.(msg, "warn"));
   blob = null;
@@ -821,7 +1049,7 @@ export async function sendAudioOrTranscriptAndDispose({
         selectedModel,
         customModel,
         syncedModels,
-        promptText: promptTextTranscript,
+        prompt: promptTranscript,
         audioPayload: null,
         onLog,
         onModelUsed,
@@ -844,15 +1072,18 @@ export async function sendAudioOrTranscriptAndDispose({
       selectedModel,
       customModel,
       syncedModels,
-      promptText: promptTextAudio,
+      prompt: promptAudio,
       audioPayload: { base64: b64, cleanMime },
       allowAudioJsonFallback: gatewayAudioSupport === "supported",
       onLog,
       onModelUsed,
       onProtocolDetected
     });
-    if (gatewayAudioSupport === "unknown") {
-      onAudioSupportDetected?.("supported");
+    if (deliveryUnverified) {
+      onLog?.(
+        `${label}: 게이트웨이가 토큰 사용량을 알려주지 않아 음성이 모델까지 갔는지 확인하지 못했습니다. 결과가 대화와 다르면 '실시간 받아적기' 모드를 쓰세요.`,
+        "warn"
+      );
     }
     return result;
   } catch (err) {
@@ -873,7 +1104,7 @@ export async function sendAudioOrTranscriptAndDispose({
           selectedModel,
           customModel,
           syncedModels,
-          promptText: promptTextTranscript,
+          prompt: promptTranscript,
           audioPayload: null,
           onLog,
           onModelUsed,

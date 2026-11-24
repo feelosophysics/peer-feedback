@@ -10,20 +10,30 @@ import {
   formatMMSS,
   generateId,
   normalizeGatewayBaseUrl,
-  parseModelJson
+  parseModelJson,
+  sanitizeDraftText
 } from "./utils.js";
 import {
   createMediaRecorderForStream,
   getSupportedMimeType
 } from "./audio.js";
 import {
-  buildRefineFromPointsPrompt,
-  buildSegmentExtractPrompt,
-  buildSegmentTranscriptPrompt,
-  buildSingleShotAudioPrompt,
-  buildSingleShotTranscriptPrompt,
-  buildSynthesizeFromNotesPrompt
+  buildFullAnalysisPrompt,
+  buildRefinePrompt,
+  buildSegmentPrompt,
+  buildSynthesizePrompt,
+  parseChecklistItems
 } from "./prompts.js";
+import {
+  alignTranscriptTimes,
+  computeConversationMetrics,
+  mergeChecklistCoverage,
+  normalizeConversationPoints,
+  numberTranscriptLines,
+  resolveUtterances,
+  splitTranscriptLines,
+  swapUtteranceSpeakers
+} from "./metrics.js";
 import {
   calcIdbChunkBytes,
   clearIdbStore,
@@ -59,6 +69,7 @@ import {
   renderDiagnosticsBox,
   renderModelSelectOptions,
   renderPointsList,
+  renderReflection,
   renderResults,
   setSpeechBadge,
   showError,
@@ -99,6 +110,7 @@ const state = {
   keyProtocolScope: "unknown", // unknown | openai_ok | wrong_protocol
   wakeLockSentinel: null,
   finalResult: null,
+  timedLines: [], // [{ t: 녹음 경과 초, text }] 음성인식이 확정한 줄마다 기록 (타임라인용)
   isBusy: false
 };
 
@@ -106,8 +118,30 @@ function persistTranscriptBackupNow() {
   saveTranscriptBackup({
     transcriptText: el.liveTranscriptTextarea.value,
     missionMemo: el.missionMemoInput.value,
-    totalActiveSeconds: state.totalActiveSeconds
+    totalActiveSeconds: state.totalActiveSeconds,
+    timedLines: state.timedLines,
+    checklistText: el.checklistInput ? el.checklistInput.value : ""
   });
+}
+
+function getChecklistItems() {
+  return parseChecklistItems(el.checklistInput ? el.checklistInput.value : "");
+}
+
+// 대본을 줄로 나누고, 줄마다 녹음 경과 초를 맞추고, 모델에 보낼 번호 붙은 대본을 만든다.
+function prepareTranscript(text) {
+  const lines = splitTranscriptLines(text);
+  const times = alignTranscriptTimes(lines, state.timedLines);
+  return { lines, times, numbered: numberTranscriptLines(lines) };
+}
+
+function buildReflection(utterances, rawCoverage) {
+  const list = Array.isArray(utterances) ? utterances : [];
+  return {
+    utterances: list,
+    metrics: computeConversationMetrics(list),
+    checklist: mergeChecklistCoverage(getChecklistItems(), rawCoverage)
+  };
 }
 
 async function requestScreenWakeLock() {
@@ -138,7 +172,11 @@ async function releaseScreenWakeLock() {
 }
 
 const speech = createSpeechController({
-  onFinalChunk: (txt) => {
+  getElapsedSeconds: () => state.totalActiveSeconds,
+  onFinalChunk: (txt, meta = {}) => {
+    if (Number.isFinite(meta.elapsedSec)) {
+      state.timedLines.push({ t: meta.elapsedSec, text: txt });
+    }
     const prevBox = el.liveTranscriptTextarea.value.trim();
     el.liveTranscriptTextarea.value = prevBox ? `${prevBox}\n${txt}` : txt;
     el.liveTranscriptTextarea.scrollTop = el.liveTranscriptTextarea.scrollHeight;
@@ -331,7 +369,7 @@ async function handleDiagnoseGateway() {
 
   const includeAudioProbe = el.uploadModeSelect.value !== "speech_text_only";
   const stepLabels = includeAudioProbe
-    ? ["1. 로컬 프록시", "2. 키·모델 확인", "3. 오디오·텍스트 점검"]
+    ? ["1. 로컬 프록시", "2. 키·모델 확인", "3. 음성 전달·텍스트 점검"]
     : ["1. 로컬 프록시", "2. 키·모델 확인", "3. 텍스트 생성 점검"];
 
   el.btnDiagnoseGateway.disabled = true;
@@ -341,7 +379,7 @@ async function handleDiagnoseGateway() {
     stepLabels,
     title: "게이트웨이 연결 테스트 중...",
     detail: includeAudioProbe
-      ? "로컬 프록시, OpenAI 호환 키, 오디오·텍스트 호환성을 차례로 확인합니다."
+      ? "로컬 프록시, OpenAI 호환 키를 확인하고, 음성 없는 요청과 음성 포함 요청의 토큰 수를 비교해 음성이 모델까지 가는지 점검합니다."
       : "로컬 프록시, OpenAI 호환 키, 텍스트 초안 생성을 차례로 확인합니다."
   });
 
@@ -357,7 +395,7 @@ async function handleDiagnoseGateway() {
           stepIndex: step,
           stepLabels,
           title: stepText,
-          detail: "잠시만 기다려 주세요 (약 1–2초 소요)."
+          detail: "잠시만 기다려 주세요 (약 2–5초 소요)."
         });
       }
     });
@@ -446,6 +484,23 @@ async function handleDiagnoseGateway() {
       return;
     }
 
+    if (result.status === "audio_inconclusive") {
+      state.keyProtocolScope = "openai_ok";
+      state.gatewayAudioSupport = "unknown";
+      syncConnectionIndicators();
+      if (el.transcriptDetails) el.transcriptDetails.open = true;
+      addAuditLog(el, `진단 결과: ${result.message} — ${result.detail}`, "warn");
+      renderDiagnosticsBox(el, {
+        variant: "warn",
+        title: result.message,
+        detail: result.detail,
+        hint: result.nextAction,
+        actionLabel: "녹음 버튼으로 이동",
+        onAction: () => el.btnStartRec.focus()
+      });
+      return;
+    }
+
     if (result.status === "wrong_key_protocol") {
       state.keyProtocolScope = "wrong_protocol";
       state.gatewayAudioSupport = "unknown";
@@ -486,7 +541,7 @@ async function handleDiagnoseGateway() {
   }
 }
 
-async function runLLM(promptText, audioPayload = null) {
+async function runLLM(prompt, audioPayload = null) {
   return await callLLMWithFallback({
     baseUrl: getGatewayBaseUrl(),
     apiKey: getApiKey(),
@@ -494,7 +549,7 @@ async function runLLM(promptText, audioPayload = null) {
     selectedModel: el.modelSelect.value,
     customModel: el.customModelInput.value,
     syncedModels: state.syncedModels,
-    promptText,
+    prompt,
     audioPayload,
     onLog: (msg, level) => addAuditLog(el, msg, level),
     onModelUsed: (modelId) => {
@@ -507,12 +562,12 @@ async function runLLM(promptText, audioPayload = null) {
   });
 }
 
-async function dispatchAudioOrTranscript({ blob, rawMime, promptTextAudio, promptTextTranscript, label, transcriptText }) {
+async function dispatchAudioOrTranscript({ blob, rawMime, promptAudio, promptTranscript, label, transcriptText }) {
   return await sendAudioOrTranscriptAndDispose({
     blob,
     rawMime,
-    promptTextAudio,
-    promptTextTranscript,
+    promptAudio,
+    promptTranscript,
     label,
     transcriptText,
     uploadMode: el.uploadModeSelect.value,
@@ -610,6 +665,7 @@ function stopCurrentRecorderAndCollectBlob() {
 }
 
 function clearLiveTranscriptUi() {
+  state.timedLines = [];
   speech.reset();
   el.speechInterimLine.textContent = "";
   el.liveTranscriptTextarea.value = "";
@@ -661,24 +717,21 @@ async function processSegmentInBackground(segmentIndex, blob, mime, segmentTrans
       : "";
 
     const memo = el.missionMemoInput.value;
-    const promptAudio = buildSegmentExtractPrompt({
+    const prepared = prepareTranscript(cleanTranscript);
+    const segmentArgs = {
       memo,
       segmentIndex,
       previousRoleHint: prevRoleHint,
-      supplementalTranscript: cleanTranscript
-    });
-    const promptTranscript = buildSegmentTranscriptPrompt({
-      memo,
-      segmentIndex,
-      previousRoleHint: prevRoleHint,
-      transcriptText: cleanTranscript
-    });
+      numberedTranscript: prepared.numbered
+    };
+    const promptAudio = buildSegmentPrompt({ ...segmentArgs, source: "audio" });
+    const promptTranscript = buildSegmentPrompt({ ...segmentArgs, source: "transcript" });
 
     const { text } = await dispatchAudioOrTranscript({
       blob,
       rawMime: mime,
-      promptTextAudio: promptAudio,
-      promptTextTranscript: promptTranscript,
+      promptAudio,
+      promptTranscript,
       label: `segment_${segmentIndex}`,
       transcriptText: cleanTranscript
     });
@@ -688,7 +741,9 @@ async function processSegmentInBackground(segmentIndex, blob, mime, segmentTrans
       segmentIndex,
       inferredRoles: parsed.inferredRoles || { speakerA: "평가자", speakerB: "피평가자" },
       points: Array.isArray(parsed.points) ? parsed.points : [],
-      segmentSummary: parsed.segmentSummary || ""
+      segmentSummary: parsed.segmentSummary || "",
+      // 돌아보기 지표용 말 묶음(글자 수·시각만 남기고 원문은 담지 않음)
+      utterances: resolveUtterances(parsed.utterances, prepared.lines, prepared.times)
     };
 
     state.extractedSegmentNotes.push(noteRecord);
@@ -749,57 +804,62 @@ async function rotateSegmentNow(isManual = false) {
   }
 }
 
-function applyFinalResult(raw) {
-  const points = Array.isArray(raw.conversationPoints)
-    ? raw.conversationPoints.map((p, idx) => ({
-        id: p.id || `pt_${idx + 1}`,
-        speaker: p.speaker || "공통",
-        category: p.category || "구현설명",
-        summary: p.summary || "",
-        checked: true
-      }))
-    : [];
-
+/**
+ * 모델 응답을 화면 상태로 바꾼다.
+ * utterances: 이미 글자 수·시각으로 풀어 둔 말 묶음(resolveUtterances 결과)
+ */
+function applyFinalResult(raw, utterances = []) {
   state.finalResult = {
     inferredRoles: raw.inferredRoles || { speakerA: "평가자", speakerB: "피평가자" },
-    conversationPoints: points,
-    reviewerToRevieweeDraft: raw.reviewerToRevieweeDraft || "",
-    revieweeToReviewerDraft: raw.revieweeToReviewerDraft || ""
+    conversationPoints: normalizeConversationPoints(raw.conversationPoints),
+    reviewerToRevieweeDraft: sanitizeDraftText(raw.reviewerToRevieweeDraft),
+    revieweeToReviewerDraft: sanitizeDraftText(raw.revieweeToReviewerDraft),
+    reflection: buildReflection(utterances, raw.checklistCoverage)
   };
 
   renderResults(el, state.finalResult);
 }
 
+function getDraftOptions() {
+  return {
+    memo: el.missionMemoInput.value,
+    checklistItems: getChecklistItems(),
+    tone: el.toneSelect.value,
+    length: el.lengthSelect.value
+  };
+}
+
+// 대본만으로 전체 분석을 요청하고 결과를 화면에 반영한다.
+async function analyzeTranscriptText(transcriptText) {
+  const prepared = prepareTranscript(transcriptText);
+  const prompt = buildFullAnalysisPrompt({
+    ...getDraftOptions(),
+    numberedTranscript: prepared.numbered,
+    source: "transcript"
+  });
+  const { text } = await runLLM(prompt, null);
+  const parsed = parseModelJson(text);
+  applyFinalResult(parsed, resolveUtterances(parsed.utterances, prepared.lines, prepared.times));
+}
+
 async function generateFromSingleAudioBlob(blob, mime, segmentIndex, transcriptText = "") {
   try {
-    const memo = el.missionMemoInput.value;
-    const tone = el.toneSelect.value;
-    const length = el.lengthSelect.value;
-
-    const promptAudio = buildSingleShotAudioPrompt({
-      memo,
-      tone,
-      length,
-      supplementalTranscript: transcriptText
-    });
-    const promptTranscript = buildSingleShotTranscriptPrompt({
-      memo,
-      tone,
-      length,
-      transcriptText
-    });
+    const prepared = prepareTranscript(transcriptText);
+    const baseArgs = { ...getDraftOptions(), numberedTranscript: prepared.numbered };
+    const promptAudio = buildFullAnalysisPrompt({ ...baseArgs, source: "audio" });
+    const promptTranscript = buildFullAnalysisPrompt({ ...baseArgs, source: "transcript" });
 
     const { text } = await dispatchAudioOrTranscript({
       blob,
       rawMime: mime,
-      promptTextAudio: promptAudio,
-      promptTextTranscript: promptTranscript,
+      promptAudio,
+      promptTranscript,
       label: `single_${segmentIndex}`,
       transcriptText
     });
     const parsed = parseModelJson(text);
 
-    applyFinalResult(parsed);
+    applyFinalResult(parsed, resolveUtterances(parsed.utterances, prepared.lines, prepared.times));
     await deleteSegmentChunksFromIdb(state.db, segmentIndex);
     await clearIdbStore(state.db, STORE_NOTES);
     await recalcIdbBytes();
@@ -815,17 +875,16 @@ async function synthesizeFinalResultFromNotes() {
     throw new Error("추출된 구간 대화 노트가 없어 초안을 만들 수 없습니다.");
   }
 
-  const prompt = buildSynthesizeFromNotesPrompt({
-    memo: el.missionMemoInput.value,
-    tone: el.toneSelect.value,
-    length: el.lengthSelect.value,
+  const prompt = buildSynthesizePrompt({
+    ...getDraftOptions(),
     notesArray: state.extractedSegmentNotes
   });
-  addAuditLog(el, `추출된 ${state.extractedSegmentNotes.length}개 구간 노트를 종합해 3단 상호 피드백 생성 중...`, "info");
+  addAuditLog(el, `추출된 ${state.extractedSegmentNotes.length}개 구간 노트를 종합해 상호 피드백 생성 중...`, "info");
 
   const { text } = await runLLM(prompt, null);
   const parsed = parseModelJson(text);
-  applyFinalResult(parsed);
+  const allUtterances = state.extractedSegmentNotes.flatMap((n) => (Array.isArray(n.utterances) ? n.utterances : []));
+  applyFinalResult(parsed, allUtterances);
   addAuditLog(el, "전체 구간 종합 피드백 초안 생성 완료 (모든 음성 파일 이미 폐기됨)", "ok");
 }
 
@@ -1044,15 +1103,7 @@ async function generateFromTranscriptOnly() {
   updateStatusBadge(el, "processing", "대본으로 초안 생성 중...");
 
   try {
-    const prompt = buildSingleShotTranscriptPrompt({
-      memo: el.missionMemoInput.value,
-      tone: el.toneSelect.value,
-      length: el.lengthSelect.value,
-      transcriptText
-    });
-    const { text } = await runLLM(prompt, null);
-    const parsed = parseModelJson(text);
-    applyFinalResult(parsed);
+    await analyzeTranscriptText(transcriptText);
     clearTranscriptBackup();
     el.recoveryBanner.classList.remove("visible");
     updateStatusBadge(el, "done", "대본 기반 초안 생성 완료");
@@ -1088,33 +1139,21 @@ async function handleAudioFileImport(file) {
 
     const mime = file.type || (file.name.endsWith(".m4a") ? "audio/mp4" : "audio/mpeg");
     const backupText = el.liveTranscriptTextarea.value.trim();
-    const memo = el.missionMemoInput.value;
-    const tone = el.toneSelect.value;
-    const length = el.lengthSelect.value;
-
-    const promptAudio = buildSingleShotAudioPrompt({
-      memo,
-      tone,
-      length,
-      supplementalTranscript: backupText
-    });
-    const promptTranscript = buildSingleShotTranscriptPrompt({
-      memo,
-      tone,
-      length,
-      transcriptText: backupText
-    });
+    const prepared = prepareTranscript(backupText);
+    const baseArgs = { ...getDraftOptions(), numberedTranscript: prepared.numbered };
+    const promptAudio = buildFullAnalysisPrompt({ ...baseArgs, source: "audio" });
+    const promptTranscript = buildFullAnalysisPrompt({ ...baseArgs, source: "transcript" });
 
     const { text } = await dispatchAudioOrTranscript({
       blob: file,
       rawMime: mime,
-      promptTextAudio: promptAudio,
-      promptTextTranscript: promptTranscript,
+      promptAudio,
+      promptTranscript,
       label: "imported_file",
       transcriptText: backupText
     });
     const parsed = parseModelJson(text);
-    applyFinalResult(parsed);
+    applyFinalResult(parsed, resolveUtterances(parsed.utterances, prepared.lines, prepared.times));
 
     updateStatusBadge(el, "done", "파일 초안 생성 · 참조 폐기 완료");
     addAuditLog(el, "불러온 음성 파일 분석 완료 및 메모리 참조 즉시 폐기 완료", "ok");
@@ -1142,6 +1181,10 @@ async function checkCrashRecoveryOnLoad() {
     if (transcriptBackup.missionMemo && !el.missionMemoInput.value.trim()) {
       el.missionMemoInput.value = transcriptBackup.missionMemo;
     }
+    if (transcriptBackup.checklistText && el.checklistInput && !el.checklistInput.value.trim()) {
+      el.checklistInput.value = transcriptBackup.checklistText;
+    }
+    state.timedLines = transcriptBackup.timedLines || [];
     if (transcriptBackup.totalActiveSeconds > 0) {
       state.totalActiveSeconds = transcriptBackup.totalActiveSeconds;
       el.timerDisplay.textContent = formatDuration(state.totalActiveSeconds);
@@ -1202,15 +1245,7 @@ async function recoverInterruptedSession() {
       if (!backupTranscript) {
         throw new Error("복구할 대본이나 음성 버퍼가 없습니다.");
       }
-      const prompt = buildSingleShotTranscriptPrompt({
-        memo: el.missionMemoInput.value,
-        tone: el.toneSelect.value,
-        length: el.lengthSelect.value,
-        transcriptText: backupTranscript
-      });
-      const { text } = await runLLM(prompt, null);
-      const parsed = parseModelJson(text);
-      applyFinalResult(parsed);
+      await analyzeTranscriptText(backupTranscript);
       clearLiveTranscriptUi();
       clearTranscriptBackup();
       el.recoveryBanner.classList.remove("visible");
@@ -1288,7 +1323,7 @@ async function regenerateDraftsFromPoints() {
   updateStatusBadge(el, "processing", "포인트 기반 초안 재작성 중...");
 
   try {
-    const prompt = buildRefineFromPointsPrompt({
+    const prompt = buildRefinePrompt({
       memo: el.missionMemoInput.value,
       tone: el.toneSelect.value,
       length: el.lengthSelect.value,
@@ -1298,8 +1333,8 @@ async function regenerateDraftsFromPoints() {
     const { text } = await runLLM(prompt, null);
     const parsed = parseModelJson(text);
 
-    state.finalResult.reviewerToRevieweeDraft = parsed.reviewerToRevieweeDraft || "";
-    state.finalResult.revieweeToReviewerDraft = parsed.revieweeToReviewerDraft || "";
+    state.finalResult.reviewerToRevieweeDraft = sanitizeDraftText(parsed.reviewerToRevieweeDraft);
+    state.finalResult.revieweeToReviewerDraft = sanitizeDraftText(parsed.revieweeToReviewerDraft);
 
     el.reviewerDraftTextarea.value = state.finalResult.reviewerToRevieweeDraft;
     el.revieweeDraftTextarea.value = state.finalResult.revieweeToReviewerDraft;
@@ -1333,9 +1368,16 @@ async function swapSpeakerRolesAndRegenerate() {
     else if (pt.speaker === "피평가자") pt.speaker = "평가자";
   }
 
+  const reflection = state.finalResult.reflection;
+  if (reflection) {
+    reflection.utterances = swapUtteranceSpeakers(reflection.utterances);
+    reflection.metrics = computeConversationMetrics(reflection.utterances);
+  }
+
   el.roleSpeakerA.textContent = roles.speakerA;
   el.roleSpeakerB.textContent = roles.speakerB;
   renderPointsList(el, state.finalResult);
+  renderReflection(el, reflection);
   addAuditLog(el, "평가자 ↔ 피평가자 역할 반전 적용 → 초안 즉시 재작성 시작", "info");
 
   await regenerateDraftsFromPoints();
@@ -1348,7 +1390,10 @@ function addCustomPoint() {
   state.finalResult.conversationPoints.push({
     id: generateId("pt"),
     speaker: el.customPointSpeaker.value,
-    category: el.customPointCategory.value,
+    topic: "",
+    kind: el.customPointKind.value,
+    quote: "",
+    relation: "",
     summary: text,
     checked: true
   });
@@ -1507,11 +1552,13 @@ function bindEvents() {
   });
 
   el.liveTranscriptTextarea.addEventListener("input", persistTranscriptBackupNow);
-  el.missionMemoInput.addEventListener("input", () => {
+  const persistIfTranscript = () => {
     if (el.liveTranscriptTextarea.value.trim()) {
       persistTranscriptBackupNow();
     }
-  });
+  };
+  el.missionMemoInput.addEventListener("input", persistIfTranscript);
+  el.checklistInput?.addEventListener("input", persistIfTranscript);
 
   el.btnRecoverProcess.addEventListener("click", recoverInterruptedSession);
   if (el.btnRecoverRestoreOnly) {

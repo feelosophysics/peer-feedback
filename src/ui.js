@@ -1,4 +1,5 @@
-import { GATEWAY_MODEL_CATALOG } from "./constants.js";
+import { DRAFT_CHAR_LIMIT, GATEWAY_MODEL_CATALOG } from "./constants.js";
+import { formatSeconds } from "./metrics.js";
 import { escapeHtml, formatBytes, nowTimeStr } from "./utils.js";
 
 export function collectElements() {
@@ -32,6 +33,7 @@ export function collectElements() {
     modelSyncStatus: document.getElementById("modelSyncStatus"),
     uploadModeSelect: document.getElementById("uploadModeSelect"),
     missionMemoInput: document.getElementById("missionMemoInput"),
+    checklistInput: document.getElementById("checklistInput"),
 
     timerDisplay: document.getElementById("timerDisplay"),
     recStatusBadge: document.getElementById("recStatusBadge"),
@@ -76,7 +78,7 @@ export function collectElements() {
     btnRegenerateDrafts: document.getElementById("btnRegenerateDrafts"),
     pointsList: document.getElementById("pointsList"),
     customPointSpeaker: document.getElementById("customPointSpeaker"),
-    customPointCategory: document.getElementById("customPointCategory"),
+    customPointKind: document.getElementById("customPointKind"),
     customPointInput: document.getElementById("customPointInput"),
     btnAddCustomPoint: document.getElementById("btnAddCustomPoint"),
 
@@ -85,7 +87,10 @@ export function collectElements() {
     btnCopyReviewer: document.getElementById("btnCopyReviewer"),
     btnCopyReviewee: document.getElementById("btnCopyReviewee"),
     reviewerCharCount: document.getElementById("reviewerCharCount"),
-    revieweeCharCount: document.getElementById("revieweeCharCount")
+    revieweeCharCount: document.getElementById("revieweeCharCount"),
+
+    reflectionCard: document.getElementById("reflectionCard"),
+    reflectionBody: document.getElementById("reflectionBody")
   };
 }
 
@@ -279,7 +284,11 @@ export function updateCharCount(textarea, counterEl) {
   const text = textarea.value || "";
   const withSpaces = text.length;
   const withoutSpaces = text.replace(/\s+/g, "").length;
-  counterEl.textContent = `${withSpaces}자 (공백 제외 ${withoutSpaces}자)`;
+  const over = withSpaces > DRAFT_CHAR_LIMIT;
+  counterEl.textContent = over
+    ? `${withSpaces}/${DRAFT_CHAR_LIMIT}자 · ${withSpaces - DRAFT_CHAR_LIMIT}자 초과 — 붙여넣기 전에 줄여 주세요`
+    : `${withSpaces}/${DRAFT_CHAR_LIMIT}자 (공백 제외 ${withoutSpaces}자)`;
+  counterEl.classList.toggle("char-over", over);
 }
 
 export function renderModelSelectOptions(el, syncedModels = []) {
@@ -364,23 +373,228 @@ export function renderPointsList(el, finalResult) {
     spTag.className = `tag ${pt.speaker === "평가자" ? "tag-reviewer" : pt.speaker === "피평가자" ? "tag-reviewee" : "tag-common"}`;
     spTag.textContent = pt.speaker;
 
-    const catTag = document.createElement("span");
-    catTag.className = "tag tag-cat";
-    catTag.textContent = pt.category;
-
     tags.appendChild(spTag);
-    tags.appendChild(catTag);
+    if (pt.kind) {
+      const kindTag = document.createElement("span");
+      kindTag.className = "tag tag-cat";
+      kindTag.textContent = pt.kind;
+      tags.appendChild(kindTag);
+    }
+    if (pt.relation) {
+      const relTag = document.createElement("span");
+      relTag.className = `tag ${RELATION_CLASS[pt.relation] || "tag-common"}`;
+      relTag.textContent = pt.relation;
+      tags.appendChild(relTag);
+    }
+
+    body.appendChild(tags);
+
+    if (pt.topic) {
+      const topicDiv = document.createElement("strong");
+      topicDiv.className = "point-topic";
+      topicDiv.textContent = pt.topic;
+      body.appendChild(topicDiv);
+    }
 
     const textDiv = document.createElement("div");
     textDiv.textContent = pt.summary;
-
-    body.appendChild(tags);
     body.appendChild(textDiv);
+
+    if (pt.quote) {
+      const quoteDiv = document.createElement("div");
+      quoteDiv.className = "point-quote";
+      quoteDiv.textContent = `“${pt.quote}”`;
+      body.appendChild(quoteDiv);
+    }
 
     item.appendChild(cb);
     item.appendChild(body);
     el.pointsList.appendChild(item);
   });
+}
+
+const RELATION_CLASS = {
+  "미션 관련": "rel-mission",
+  "미션 밖 탐구": "rel-explore",
+  잡담: "rel-chat"
+};
+const SPEAKER_CLASS = {
+  평가자: "sp-reviewer",
+  피평가자: "sp-reviewee",
+  불명: "sp-unknown"
+};
+
+function pct(share) {
+  return `${Math.round((share || 0) * 100)}%`;
+}
+
+function makeEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+// 비중 막대 한 줄: [{ label, share, cls }]
+function makeShareBar(title, parts, note = "") {
+  const wrap = makeEl("div", "refl-block");
+  const head = makeEl("div", "refl-head");
+  head.appendChild(makeEl("span", "refl-title", title));
+  if (note) head.appendChild(makeEl("span", "help-text", note));
+  wrap.appendChild(head);
+
+  const bar = makeEl("div", "share-bar");
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", `${title}: ${parts.map((p) => `${p.label} ${pct(p.share)}`).join(", ")}`);
+  for (const p of parts) {
+    if (!(p.share > 0)) continue;
+    const seg = makeEl("span", `share-seg ${p.cls}`);
+    seg.style.width = `${p.share * 100}%`;
+    seg.title = `${p.label} ${pct(p.share)}`;
+    bar.appendChild(seg);
+  }
+  wrap.appendChild(bar);
+
+  const legend = makeEl("div", "share-legend");
+  for (const p of parts) {
+    const item = makeEl("span", "legend-item");
+    item.appendChild(makeEl("span", `legend-swatch ${p.cls}`));
+    item.appendChild(document.createTextNode(`${p.label} ${pct(p.share)}`));
+    legend.appendChild(item);
+  }
+  wrap.appendChild(legend);
+  return wrap;
+}
+
+/**
+ * '대화 돌아보기' 영역을 그린다. reflection = { metrics, checklist, timelineNote }
+ * 모델이 준 글자는 모두 textContent로만 넣는다.
+ */
+export function renderReflection(el, reflection) {
+  if (!el.reflectionBody) return;
+  el.reflectionBody.innerHTML = "";
+  const metrics = reflection?.metrics;
+  const checklist = reflection?.checklist || [];
+
+  if (!metrics || metrics.utteranceCount === 0) {
+    el.reflectionBody.appendChild(
+      makeEl("div", "help-text", "말 단위 표시를 받지 못해 지표를 계산하지 못했습니다. 초안과 포인트는 그대로 쓸 수 있습니다.")
+    );
+  } else {
+    el.reflectionBody.appendChild(
+      makeShareBar(
+        "발언 비중",
+        [
+          { label: "평가자", share: metrics.speakerShare.평가자, cls: SPEAKER_CLASS.평가자 },
+          { label: "피평가자", share: metrics.speakerShare.피평가자, cls: SPEAKER_CLASS.피평가자 },
+          { label: "화자 불명", share: metrics.speakerShare.불명, cls: SPEAKER_CLASS.불명 }
+        ],
+        `글자 수 기준 · 총 ${metrics.totalChars.toLocaleString("ko-KR")}자`
+      )
+    );
+
+    const stats = makeEl("div", "refl-stats");
+    const addStat = (label, value, sub = "") => {
+      const box = makeEl("div", "refl-stat");
+      box.appendChild(makeEl("span", "refl-stat-label", label));
+      box.appendChild(makeEl("strong", "refl-stat-value", value));
+      if (sub) box.appendChild(makeEl("span", "help-text", sub));
+      stats.appendChild(box);
+    };
+    const q = metrics.questionCount;
+    addStat("질문", `${q.total}번`, `평가자 ${q.평가자} · 피평가자 ${q.피평가자}${q.불명 ? ` · 불명 ${q.불명}` : ""}`);
+    addStat("주고받기", `${metrics.turnCount}번`, "화자가 바뀐 횟수");
+    const run = metrics.longestRun;
+    if (run) {
+      const range = Number.isFinite(run.startT) && Number.isFinite(run.endT)
+        ? ` · ${formatSeconds(run.startT)}–${formatSeconds(run.endT)}`
+        : "";
+      addStat("가장 길게 이어진 설명", `${run.speaker} 약 ${run.chars.toLocaleString("ko-KR")}자`, `말 묶음 ${run.utteranceCount}개${range}`);
+    }
+    el.reflectionBody.appendChild(stats);
+
+    if (metrics.relationLabeledChars > 0) {
+      el.reflectionBody.appendChild(
+        makeShareBar(
+          "대화 성격",
+          [
+            { label: "미션 관련", share: metrics.relationShare["미션 관련"], cls: RELATION_CLASS["미션 관련"] },
+            { label: "미션 밖 탐구", share: metrics.relationShare["미션 밖 탐구"], cls: RELATION_CLASS["미션 밖 탐구"] },
+            { label: "잡담", share: metrics.relationShare.잡담, cls: RELATION_CLASS.잡담 }
+          ],
+          "글자 수 기준"
+        )
+      );
+    }
+
+    const tl = metrics.timeline;
+    if (tl && tl.segments.length > 0) {
+      const block = makeEl("div", "refl-block");
+      const head = makeEl("div", "refl-head");
+      head.appendChild(makeEl("span", "refl-title", tl.basis === "time" ? "시간 흐름" : "발언 순서 흐름"));
+      head.appendChild(
+        makeEl(
+          "span",
+          "help-text",
+          tl.basis === "time"
+            ? `녹음 경과 ${formatSeconds(tl.startSec)}–${formatSeconds(tl.startSec + tl.durationSec)} · 위: 대화 성격, 아래: 화자`
+            : "시각 정보가 없어 글자 수 비례로 그렸습니다 · 위: 대화 성격, 아래: 화자"
+        )
+      );
+      block.appendChild(head);
+
+      for (const lane of ["relation", "speaker"]) {
+        const strip = makeEl("div", `timeline-strip lane-${lane}`);
+        // 같은 색이 이어지는 조각은 하나로 합쳐 경계선이 생기지 않게 한다
+        const merged = [];
+        for (const seg of tl.segments) {
+          const label = lane === "relation" ? (seg.relation || "표시 없음") : seg.speaker;
+          const last = merged[merged.length - 1];
+          if (last && last.label === label) {
+            last.width = seg.start + seg.width - last.start;
+          } else {
+            merged.push({ label, start: seg.start, width: seg.width, startSec: seg.startSec });
+          }
+        }
+        for (const seg of merged) {
+          const cls = lane === "relation"
+            ? (RELATION_CLASS[seg.label] || "rel-none")
+            : (SPEAKER_CLASS[seg.label] || "sp-unknown");
+          const piece = makeEl("span", `timeline-seg ${cls}`);
+          piece.style.left = `${seg.start * 100}%`;
+          piece.style.width = `${seg.width * 100}%`;
+          const when = Number.isFinite(seg.startSec) ? `${formatSeconds(seg.startSec)} ` : "";
+          piece.title = `${when}${seg.label}`;
+          strip.appendChild(piece);
+        }
+        block.appendChild(strip);
+      }
+      el.reflectionBody.appendChild(block);
+    }
+  }
+
+  if (checklist.length > 0) {
+    const block = makeEl("div", "refl-block");
+    const head = makeEl("div", "refl-head");
+    head.appendChild(makeEl("span", "refl-title", "체크 항목"));
+    const coveredCount = checklist.filter((c) => c.covered === true).length;
+    head.appendChild(makeEl("span", "help-text", `${checklist.length}개 중 ${coveredCount}개 다룸`));
+    block.appendChild(head);
+    const list = makeEl("ul", "checklist-result");
+    for (const c of checklist) {
+      const li = makeEl("li", "checklist-row");
+      const badgeText = c.covered === true ? "다룸" : c.covered === false ? "안 다룸" : "확인 못 함";
+      const badgeCls = c.covered === true ? "cov-yes" : c.covered === false ? "cov-no" : "cov-unknown";
+      li.appendChild(makeEl("span", `cov-badge ${badgeCls}`, badgeText));
+      const txt = makeEl("span", "checklist-item");
+      txt.textContent = c.item;
+      li.appendChild(txt);
+      if (c.evidence) li.appendChild(makeEl("span", "help-text checklist-evidence", c.evidence));
+      list.appendChild(li);
+    }
+    block.appendChild(list);
+    el.reflectionBody.appendChild(block);
+  }
 }
 
 export function renderResults(el, finalResult) {
@@ -394,6 +608,7 @@ export function renderResults(el, finalResult) {
   el.roleSpeakerB.textContent = finalResult.inferredRoles.speakerB || "-";
 
   renderPointsList(el, finalResult);
+  renderReflection(el, finalResult.reflection);
 
   el.reviewerDraftTextarea.value = finalResult.reviewerToRevieweeDraft || "";
   el.revieweeDraftTextarea.value = finalResult.revieweeToReviewerDraft || "";

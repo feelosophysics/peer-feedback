@@ -16,28 +16,31 @@ import {
   normalizeGatewayBaseUrl,
   parseGeminiVersion,
   parseModelJson,
+  sanitizeDraftText,
   sortAllowedGatewayModels
 } from "../src/utils.js";
 import { createSilentWavBlob, encodeMonoPcmToWavBuffer } from "../src/audio.js";
 import {
-  buildRefineFromPointsPrompt,
-  buildSegmentExtractPrompt,
-  buildSegmentTranscriptPrompt,
-  buildSingleShotAudioPrompt,
-  buildSingleShotTranscriptPrompt,
-  buildSynthesizeFromNotesPrompt,
+  buildFullAnalysisPrompt,
+  buildRefinePrompt,
+  buildSegmentPrompt,
+  buildSynthesizePrompt,
   getLengthInstruction,
-  getToneInstruction
+  getToneInstruction,
+  parseChecklistItems
 } from "../src/prompts.js";
 import {
+  buildChatMessages,
   buildGatewayFetchRequest,
   buildModelCandidates,
   callGatewayOpenAiEndpoint,
   callLLMWithFallback,
   formatCorsOrNetworkMessage,
   isJsonModeUnsupportedCached,
+  judgeAudioProbe,
   resetGatewayFeatureCache,
-  runGatewayDiagnostics
+  runGatewayDiagnostics,
+  sendAudioOrTranscriptAndDispose
 } from "../src/api.js";
 import {
   clearTranscriptBackup,
@@ -45,6 +48,17 @@ import {
   saveTranscriptBackup
 } from "../src/storage.js";
 import { createSpeechController } from "../src/speech.js";
+import {
+  alignTranscriptTimes,
+  buildTimeline,
+  computeConversationMetrics,
+  mergeChecklistCoverage,
+  normalizeConversationPoints,
+  numberTranscriptLines,
+  resolveUtterances,
+  splitTranscriptLines,
+  swapUtteranceSpeakers
+} from "../src/metrics.js";
 
 test("normalizeGatewayBaseUrl strips endpoints and ensures https", () => {
   assert.equal(normalizeGatewayBaseUrl(""), "");
@@ -145,41 +159,104 @@ test("encodeMonoPcmToWavBuffer writes valid 16kHz mono 16-bit RIFF/WAVE PCM", ()
   assert.equal(silentBlob.size, 44 + 6400 * 2);
 });
 
-test("prompts include peer feedback criteria, tone, length, and JSON keys", () => {
-  assert.match(getToneInstruction("formal_hapsyo"), /격식체/);
-  assert.match(getLengthInstruction("short"), /3–4문장/);
+test("tone and length instructions match the new options", () => {
+  assert.match(getToneInstruction("warm_casual"), /다정한 대화체/);
+  assert.match(getToneInstruction(undefined), /다정한 대화체/); // 기본값
+  assert.match(getToneInstruction("polite_haeyo"), /정중한 해요체/);
+  assert.match(getToneInstruction("plain_bullets"), /개조식/);
+  assert.match(getLengthInstruction("short"), /약 300자/);
+  assert.match(getLengthInstruction("medium"), /400–900자/);
+  assert.match(getLengthInstruction("long"), /2000자를 넘기지/);
+});
 
-  const audioPrompt = buildSingleShotAudioPrompt({
-    memo: "A3-2 테스트",
-    tone: "plain_concise",
-    length: "long",
-    supplementalTranscript: "예외 처리 설명"
+test("every prompt builder splits role/rules (system) from conversation material (user)", () => {
+  const transcript = "[1] 이 함수는 왜 나눴어요?\n[2] 테스트하기 쉬우려고요";
+  const full = buildFullAnalysisPrompt({
+    memo: "감성 분석 미션",
+    checklistItems: ["예외 처리", "README"],
+    numberedTranscript: transcript
   });
-  assert.match(audioPrompt, /A3-2 테스트/);
-  assert.match(audioPrompt, /Why\(설계 의도/);
-  assert.match(audioPrompt, /reviewerToRevieweeDraft/);
-  assert.match(audioPrompt, /revieweeToReviewerDraft/);
-  assert.match(audioPrompt, /예외 처리 설명/);
-
-  const trPrompt = buildSingleShotTranscriptPrompt({ transcriptText: "테스트 대본" });
-  assert.match(trPrompt, /테스트 대본/);
-
-  const segPrompt = buildSegmentExtractPrompt({ segmentIndex: 2, previousRoleHint: "A: 평가자" });
-  assert.match(segPrompt, /제2구간/);
-  assert.match(segPrompt, /A: 평가자/);
-
-  const segTrPrompt = buildSegmentTranscriptPrompt({ segmentIndex: 3, transcriptText: "구간 내용" });
-  assert.match(segTrPrompt, /제3구간/);
-  assert.match(segTrPrompt, /구간 내용/);
-
-  const synthPrompt = buildSynthesizeFromNotesPrompt({ notesArray: [{ segmentIndex: 1, points: [] }] });
-  assert.match(synthPrompt, /segmentIndex/);
-
-  const refinePrompt = buildRefineFromPointsPrompt({
-    activePoints: [{ speaker: "평가자", category: "칭찬/강점", summary: "설계 이유 설명" }],
+  const synth = buildSynthesizePrompt({ memo: "감성 분석 미션", notesArray: [{ segmentIndex: 1, points: [], utterances: [{ from: 1 }] }] });
+  const seg = buildSegmentPrompt({ segmentIndex: 2, previousRoleHint: "A: 평가자", numberedTranscript: transcript });
+  const refine = buildRefinePrompt({
+    activePoints: [{ speaker: "평가자", topic: "함수 분리", kind: "설명", quote: "테스트하기 쉬우려고요", summary: "분리 이유" }],
     inferredRoles: { speakerA: "평가자", speakerB: "피평가자" }
   });
-  assert.match(refinePrompt, /설계 이유 설명/);
+
+  for (const p of [full, synth, seg, refine]) {
+    assert.equal(typeof p.system, "string");
+    assert.equal(typeof p.user, "string");
+    // 공통 상황 블록은 system에만
+    assert.match(p.system, /코디세이/);
+    assert.match(p.system, /마크다운은 렌더링되지 않습니다/);
+    assert.match(p.system, /2000자/);
+    assert.doesNotMatch(p.system, /NDA/);
+    assert.doesNotMatch(p.user, /\[상황\]/);
+  }
+
+  // 자료는 user에만
+  assert.match(full.user, /감성 분석 미션/);
+  assert.match(full.user, /테스트하기 쉬우려고요/);
+  assert.match(full.user, /- 예외 처리/);
+  assert.doesNotMatch(full.system, /감성 분석 미션/);
+  assert.doesNotMatch(full.system, /테스트하기 쉬우려고요/);
+  assert.match(seg.user, /제2구간/);
+  assert.match(seg.user, /A: 평가자/);
+  assert.match(refine.user, /함수 분리/);
+
+  // 초안 규칙: 형식적 필수 칸 없음, 가이드라인 중심 아님, 마크다운 금지
+  for (const p of [full, synth, refine]) {
+    assert.match(p.system, /반드시 채워야 하는 칸은 없습니다/);
+    assert.match(p.system, /가이드라인·미션·평가 항목 중심으로 쓰지 않습니다/);
+    assert.match(p.system, /\*\*, #/);
+    assert.match(p.system, /reviewerToRevieweeDraft/);
+    assert.match(p.system, /revieweeToReviewerDraft/);
+  }
+  // 구간 분석은 초안을 쓰지 않고 말 묶음만 표시
+  assert.doesNotMatch(seg.system, /reviewerToRevieweeDraft/);
+  assert.match(seg.system, /"utterances"/);
+
+  // 새 포인트 구조와 체크 항목
+  assert.match(full.system, /"topic"/);
+  assert.match(full.system, /"relation"/);
+  assert.match(full.system, /"quote"/);
+  assert.match(full.system, /"checklistCoverage"/);
+  assert.doesNotMatch(buildFullAnalysisPrompt({ numberedTranscript: transcript }).system, /checklistCoverage/);
+
+  // 합성 단계에는 말 묶음(utterances)을 보내지 않는다
+  assert.doesNotMatch(synth.user, /"utterances"/);
+
+  // 음성 경로: 보조 대본이 없으면 받아적기 텍스트로 묶음을 표시
+  const audioOnly = buildFullAnalysisPrompt({ source: "audio" });
+  assert.match(audioOnly.user, /\[첨부\] 대화 음성/);
+  assert.match(audioOnly.system, /"text"/);
+});
+
+test("parseChecklistItems keeps one item per line and strips list markers", () => {
+  assert.deepEqual(parseChecklistItems(""), []);
+  assert.deepEqual(parseChecklistItems("- 예외 처리\n\n2. README 구성\n  * 테스트  "), ["예외 처리", "README 구성", "테스트"]);
+});
+
+test("sanitizeDraftText strips markdown the feedback box cannot render", () => {
+  const raw = "## 오늘 이야기\n**정말** 좋았어요\n* 첫째\n• 둘째\n- 셋째\n\n\n\n끝  ";
+  assert.equal(sanitizeDraftText(raw), "오늘 이야기\n정말 좋았어요\n- 첫째\n- 둘째\n- 셋째\n\n끝");
+  assert.equal(sanitizeDraftText("`코드`는 유지"), "`코드`는 유지");
+});
+
+test("buildChatMessages sends rules as system and material (+audio) as user", () => {
+  assert.deepEqual(buildChatMessages("plain"), [{ role: "user", content: "plain" }]);
+
+  const split = buildChatMessages({ system: "규칙", user: "자료" });
+  assert.deepEqual(split, [
+    { role: "system", content: "규칙" },
+    { role: "user", content: "자료" }
+  ]);
+
+  const withAudio = buildChatMessages({ system: "규칙", user: "자료" }, { base64: "AAA=", cleanMime: "audio/wav" });
+  assert.equal(withAudio[0].role, "system");
+  assert.equal(withAudio[1].role, "user");
+  assert.deepEqual(withAudio[1].content[0], { type: "text", text: "자료" });
+  assert.deepEqual(withAudio[1].content[1], { type: "input_audio", input_audio: { data: "AAA=", format: "wav" } });
 });
 
 test("API request builder and model candidate selection behave cleanly", () => {
@@ -314,7 +391,7 @@ test("callGatewayOpenAiEndpoint retries without response_format on 400 unsupport
         apiKey: "sk-test-key",
         localProxyAvailable: false,
         modelId,
-        promptText: "hello",
+        prompt: "hello",
         options: {
           onJsonModeFallback: (id) => fallbackEvents.push(id)
         }
@@ -332,7 +409,7 @@ test("callGatewayOpenAiEndpoint retries without response_format on 400 unsupport
         apiKey: "sk-test-key",
         localProxyAvailable: false,
         modelId,
-        promptText: "hello again"
+        prompt: "hello again"
       });
       assert.equal(second, '{"ok":true}');
       assert.equal(calls.length, 3);
@@ -344,7 +421,7 @@ test("callGatewayOpenAiEndpoint retries without response_format on 400 unsupport
         apiKey: "sk-test-key",
         localProxyAvailable: false,
         modelId: "claude-sonnet-4",
-        promptText: "other model"
+        prompt: "other model"
       });
       assert.equal(calls.length, 5);
       assert.deepEqual(calls[3].body.response_format, { type: "json_object" });
@@ -355,7 +432,7 @@ test("callGatewayOpenAiEndpoint retries without response_format on 400 unsupport
         apiKey: "sk-test-key",
         localProxyAvailable: false,
         modelId,
-        promptText: "other base"
+        prompt: "other base"
       });
       assert.equal(calls.length, 7);
       assert.deepEqual(calls[5].body.response_format, { type: "json_object" });
@@ -368,7 +445,7 @@ test("callGatewayOpenAiEndpoint retries without response_format on 400 unsupport
         apiKey: "sk-test-key",
         localProxyAvailable: false,
         modelId,
-        promptText: "after reset"
+        prompt: "after reset"
       });
       assert.equal(calls.length, 9);
       assert.deepEqual(calls[7].body.response_format, { type: "json_object" });
@@ -415,7 +492,7 @@ test("audio payload handles 400 unsupported_feature according to allowAudioJsonF
             apiKey: "sk-test-key",
             localProxyAvailable: false,
             selectedModel: "gemini-3-flash",
-            promptText: "analyze",
+            prompt: "analyze",
             audioPayload
           }),
         (err) => Boolean(err.isAudioRejected)
@@ -428,7 +505,7 @@ test("audio payload handles 400 unsupported_feature according to allowAudioJsonF
         apiKey: "sk-test-key",
         localProxyAvailable: false,
         selectedModel: "gemini-3-flash",
-        promptText: "analyze",
+        prompt: "analyze",
         audioPayload,
         allowAudioJsonFallback: true
       });
@@ -780,4 +857,383 @@ test("createSpeechController recovers from InvalidStateError on restart, backs o
     if (prevWindow === undefined) delete globalThis.window;
     else globalThis.window = prevWindow;
   }
+});
+
+test("transcript lines are numbered for the model and aligned to recorded times", () => {
+  const lines = splitTranscriptLines("  첫 줄 \n\n둘째 줄\n셋째 줄\n");
+  assert.deepEqual(lines, ["첫 줄", "둘째 줄", "셋째 줄"]);
+  assert.equal(numberTranscriptLines(lines), "[1] 첫 줄\n[2] 둘째 줄\n[3] 셋째 줄");
+
+  // 사용자가 둘째 줄을 고친 경우: 고친 줄만 시각을 잃는다
+  const timed = [
+    { t: 3, text: "첫 줄" },
+    { t: 9, text: "둘쨰 줄" },
+    { t: 15, text: "셋째 줄" }
+  ];
+  assert.deepEqual(alignTranscriptTimes(lines, timed), [3, null, 15]);
+  // 시각 기록이 없으면(붙여넣은 대본) 모두 null
+  assert.deepEqual(alignTranscriptTimes(lines, []), [null, null, null]);
+  // 구간 대본(뒷부분만)도 앞 기록을 건너뛰고 맞춘다
+  assert.deepEqual(alignTranscriptTimes(["셋째 줄"], timed), [15]);
+});
+
+test("resolveUtterances turns model line ranges into countable chunks and fills unmarked lines", () => {
+  const lines = ["이거 왜 나눴어요", "테스트하려고요 함수 단위로", "아 그렇구나", "점심 뭐 드셨어요"];
+  const times = [0, 5, 12, 20];
+  const resolved = resolveUtterances(
+    [
+      { from: 1, to: 1, speaker: "평가자", question: true, relation: "미션 관련" },
+      { from: 2, to: 2, speaker: "피평가자", question: false, relation: "미션 관련" },
+      { from: 4, to: 9, speaker: "평가자", question: "true", relation: "잡담" } // 범위 밖 줄 번호는 잘라냄
+    ],
+    lines,
+    times
+  );
+  assert.equal(resolved.length, 4);
+  assert.deepEqual(resolved.map((u) => u.speaker), ["평가자", "피평가자", "불명", "평가자"]);
+  assert.deepEqual(resolved.map((u) => u.chars), [7, 12, 5, 7]); // 공백 제외 글자 수
+  assert.deepEqual(resolved.map((u) => u.t), [0, 5, 12, 20]);
+  assert.equal(resolved[3].isQuestion, true);
+  assert.equal(resolved[2].relation, null);
+
+  // 대본 줄이 없으면(음성만) 받아적기 text 길이를 쓴다
+  const audioOnly = resolveUtterances([{ text: "안녕 하세요", speaker: "reviewer", relation: "off-topic" }], []);
+  assert.deepEqual(audioOnly, [{ speaker: "평가자", isQuestion: false, relation: "잡담", chars: 5, t: null, firstLine: null }]);
+
+  // 모델이 아무것도 표시하지 않으면 전부 불명 한 묶음
+  const unmarked = resolveUtterances(undefined, ["가", "나"], [null, null]);
+  assert.deepEqual(unmarked.map((u) => [u.speaker, u.chars]), [["불명", 2]]);
+});
+
+test("computeConversationMetrics counts share, questions, turns, longest run, and relation share", () => {
+  const u = (speaker, chars, extra = {}) => ({ speaker, chars, isQuestion: false, relation: "미션 관련", t: null, ...extra });
+  const metrics = computeConversationMetrics([
+    u("평가자", 20, { isQuestion: true, t: 0 }),
+    u("피평가자", 100, { t: 10 }),
+    u("피평가자", 80, { t: 40, relation: "미션 밖 탐구" }),
+    u("불명", 10, { t: 60, relation: null }),
+    u("평가자", 30, { isQuestion: true, t: 70, relation: "잡담" }),
+    u("피평가자", 60, { t: 80 })
+  ]);
+
+  assert.equal(metrics.totalChars, 300);
+  assert.deepEqual(metrics.speakerChars, { 평가자: 50, 피평가자: 240, 불명: 10 });
+  assert.equal(metrics.speakerShare.피평가자, 0.8);
+  assert.deepEqual(metrics.questionCount, { 평가자: 2, 피평가자: 0, 불명: 0, total: 2 });
+  // 평→피, (불명 건너뜀) 피→평, 평→피 = 3번
+  assert.equal(metrics.turnCount, 3);
+  assert.equal(metrics.longestRun.speaker, "피평가자");
+  assert.equal(metrics.longestRun.chars, 180);
+  assert.equal(metrics.longestRun.utteranceCount, 2);
+  assert.equal(metrics.longestRun.startT, 10);
+  assert.equal(metrics.longestRun.endT, 60); // 다음 묶음이 시작한 시각
+  // 대화 성격은 표시 있는 글자(290자)만 기준
+  assert.equal(metrics.relationLabeledChars, 290);
+  assert.equal(metrics.relationChars["미션 관련"], 180);
+  assert.ok(Math.abs(metrics.relationShare.잡담 - 30 / 290) < 1e-9);
+  assert.equal(metrics.timeline.basis, "time");
+
+  const empty = computeConversationMetrics([]);
+  assert.equal(empty.utteranceCount, 0);
+  assert.equal(empty.longestRun, null);
+  assert.equal(empty.timeline.basis, "none");
+});
+
+test("buildTimeline uses seconds when most chunks are timed, otherwise falls back to order", () => {
+  const timed = buildTimeline([
+    { speaker: "평가자", chars: 10, relation: "미션 관련", t: 0 },
+    { speaker: "피평가자", chars: 10, relation: "잡담", t: 30 },
+    { speaker: "평가자", chars: 10, relation: "미션 관련", t: 60 }
+  ]);
+  assert.equal(timed.basis, "time");
+  assert.equal(timed.durationSec, 90); // 마지막 묶음은 평균 간격(30초)만큼
+  assert.deepEqual(timed.segments.map((s) => [s.start, s.width]), [[0, 1 / 3], [1 / 3, 1 / 3], [2 / 3, 1 / 3]]);
+  assert.equal(timed.segments[1].relation, "잡담");
+
+  const ordered = buildTimeline([
+    { speaker: "평가자", chars: 30, relation: "미션 관련", t: null },
+    { speaker: "피평가자", chars: 10, relation: "잡담", t: null }
+  ]);
+  assert.equal(ordered.basis, "order");
+  assert.deepEqual(ordered.segments.map((s) => [s.start, s.width]), [[0, 0.75], [0.75, 0.25]]);
+});
+
+test("swapUtteranceSpeakers and normalizeConversationPoints", () => {
+  assert.deepEqual(
+    swapUtteranceSpeakers([{ speaker: "평가자" }, { speaker: "피평가자" }, { speaker: "불명" }]).map((x) => x.speaker),
+    ["피평가자", "평가자", "불명"]
+  );
+
+  const points = normalizeConversationPoints([
+    { speaker: "피평가자", topic: "상태 분리", kind: "설명", quote: "“화면과 데이터는 따로 살아요”", relation: "미션 관련", summary: "상태를 나눈 이유" },
+    { speaker: "공통", category: "개선제안/놓친점", summary: "옛 형식 포인트" },
+    { speaker: "평가자", summary: "" } // 내용 없으면 버림
+  ]);
+  assert.equal(points.length, 2);
+  assert.equal(points[0].quote, "화면과 데이터는 따로 살아요");
+  assert.equal(points[0].relation, "미션 관련");
+  assert.equal(points[1].kind, "개선");
+  assert.equal(points[1].speaker, "공통");
+  assert.ok(points.every((p) => p.checked === true));
+});
+
+test("mergeChecklistCoverage matches by text or order and leaves unknowns as null", () => {
+  const merged = mergeChecklistCoverage(
+    ["예외 처리 이유", "README 구성", "테스트"],
+    [
+      { item: "README  구성", covered: true, evidence: "실행 명령 위치" },
+      { item: "예외 처리 이유", covered: "false", evidence: "" }
+    ]
+  );
+  assert.deepEqual(merged, [
+    { item: "예외 처리 이유", covered: false, evidence: "" },
+    { item: "README 구성", covered: true, evidence: "실행 명령 위치" },
+    { item: "테스트", covered: null, evidence: "" }
+  ]);
+  assert.deepEqual(mergeChecklistCoverage([], [{ item: "x", covered: true }]), []);
+});
+
+test("transcript backup keeps timed lines and checklist, and still reads old backups", () => {
+  const store = new Map();
+  const prevLocalStorage = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k)
+  };
+  try {
+    saveTranscriptBackup({
+      transcriptText: "첫 줄\n둘째 줄",
+      timedLines: [{ t: 1.23, text: "첫 줄" }, { t: "x", text: "버려짐" }, { t: 4, text: "둘째 줄" }],
+      checklistText: "예외 처리"
+    });
+    const loaded = loadTranscriptBackup();
+    assert.deepEqual(loaded.timedLines, [{ t: 1.2, text: "첫 줄" }, { t: 4, text: "둘째 줄" }]);
+    assert.equal(loaded.checklistText, "예외 처리");
+
+    // 이전 형식(시각·체크 항목 없음)
+    store.set("peer_feedback_transcript_backup_v1", JSON.stringify({ transcriptText: "옛 대본", totalActiveSeconds: 30 }));
+    const old = loadTranscriptBackup();
+    assert.equal(old.transcriptText, "옛 대본");
+    assert.deepEqual(old.timedLines, []);
+    assert.equal(old.checklistText, "");
+  } finally {
+    clearTranscriptBackup();
+    if (prevLocalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prevLocalStorage;
+  }
+});
+
+test("createSpeechController reports elapsed seconds with each finalized result", () => {
+  const prevWindow = globalThis.window;
+  let instance = null;
+  class MockSpeechRecognition {
+    constructor() { instance = this; }
+    start() { this.onstart?.(); }
+    stop() {}
+    abort() {}
+  }
+  globalThis.window = { SpeechRecognition: MockSpeechRecognition };
+  try {
+    let elapsed = 42;
+    const finals = [];
+    const speech = createSpeechController({
+      getElapsedSeconds: () => elapsed,
+      onFinalChunk: (txt, meta) => finals.push({ txt, t: meta.elapsedSec })
+    });
+    speech.setActive(true);
+    speech.start();
+    instance.onresult({ resultIndex: 0, results: [{ 0: { transcript: "하나" }, isFinal: true }] });
+    elapsed = 50;
+    instance.onresult({ resultIndex: 0, results: [{ 0: { transcript: "둘 중간" }, isFinal: false }] });
+    speech.stop(true); // 남은 중간 결과도 시각과 함께 확정
+    assert.deepEqual(finals, [{ txt: "하나", t: 42 }, { txt: "둘 중간", t: 50 }]);
+  } finally {
+    if (prevWindow === undefined) delete globalThis.window;
+    else globalThis.window = prevWindow;
+  }
+});
+
+test("judgeAudioProbe compares prompt_tokens with and without audio", () => {
+  assert.equal(judgeAudioProbe({ controlTokens: 40, audioTokens: 104, audioSeconds: 2 }).verdict, "delivered");
+  const dropped = judgeAudioProbe({ controlTokens: 40, audioTokens: 41, audioSeconds: 2 });
+  assert.equal(dropped.verdict, "dropped");
+  assert.equal(dropped.diff, 1);
+  assert.equal(dropped.expected, 64);
+  assert.equal(judgeAudioProbe({ controlTokens: 40, audioTokens: undefined }).verdict, "inconclusive");
+  assert.equal(judgeAudioProbe({ controlTokens: 0, audioTokens: 0 }).verdict, "inconclusive");
+});
+
+function makeAudioProbeFetch({ controlUsage, audioUsage }) {
+  const seen = { control: 0, audio: 0, text: 0 };
+  const fetchImpl = async (url, init) => {
+    if (url === "/api/health") return makeJsonResponse(200, { ok: true, proxy: true, runtime: "node" });
+    if (url === "/api/proxy/v1/models") return makeJsonResponse(200, { data: [{ id: "gemini-3-flash" }] });
+    if (url === "/api/proxy/v1/chat/completions") {
+      const body = JSON.parse(init.body);
+      const userMsg = body.messages.find((m) => m.role === "user");
+      if (Array.isArray(userMsg.content)) {
+        seen.audio += 1;
+        assert.equal(userMsg.content[1].type, "input_audio");
+        // 2초 16kHz 16bit WAV → base64 약 85KB (무음 0.4초 프로브보다 큼)
+        assert.ok(userMsg.content[1].input_audio.data.length > 80000);
+        return makeJsonResponse(200, { choices: [{ message: { content: "삐" } }], ...(audioUsage ? { usage: audioUsage } : {}) });
+      }
+      if (body.response_format || /JSON/.test(userMsg.content)) {
+        seen.text += 1;
+        return makeJsonResponse(200, { choices: [{ message: { content: '{"ok":true}' } }] });
+      }
+      seen.control += 1;
+      assert.equal(body.temperature, 0);
+      return makeJsonResponse(200, { choices: [{ message: { content: "없음" } }], ...(controlUsage ? { usage: controlUsage } : {}) });
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+  return { fetchImpl, seen };
+}
+
+test("runGatewayDiagnostics marks audio supported only when audio adds prompt tokens", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl, seen } = makeAudioProbeFetch({
+    controlUsage: { prompt_tokens: 38 },
+    audioUsage: { prompt_tokens: 102 }
+  });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const diag = await runGatewayDiagnostics({ baseUrl: "https://gw-probe1.example.com", apiKey: "sk-test-key", includeAudioProbe: true });
+    assert.equal(diag.status, "audio_supported");
+    assert.equal(diag.audioProbe.diff, 64);
+    assert.match(diag.detail, /38토큰 → 음성 2초 포함 102토큰/);
+    assert.deepEqual(seen, { control: 1, audio: 1, text: 0 });
+  });
+});
+
+test("runGatewayDiagnostics reports silently dropped audio as unsupported (HTTP 200 but no token increase)", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl, seen } = makeAudioProbeFetch({
+    controlUsage: { prompt_tokens: 38 },
+    audioUsage: { prompt_tokens: 39 }
+  });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const diag = await runGatewayDiagnostics({ baseUrl: "https://gw-probe2.example.com", apiKey: "sk-test-key", includeAudioProbe: true });
+    assert.equal(diag.status, "audio_unsupported");
+    assert.equal(diag.audioDropped, true);
+    assert.match(diag.message, /전달되지 않음/);
+    assert.equal(diag.textProbeOk, true);
+    assert.deepEqual(seen, { control: 1, audio: 1, text: 1 });
+  });
+});
+
+test("runGatewayDiagnostics withholds a verdict when the gateway returns no usage", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl } = makeAudioProbeFetch({ controlUsage: null, audioUsage: null });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const diag = await runGatewayDiagnostics({ baseUrl: "https://gw-probe3.example.com", apiKey: "sk-test-key", includeAudioProbe: true });
+    assert.equal(diag.status, "audio_inconclusive");
+    assert.match(diag.message, /판정 보류/);
+    assert.match(diag.nextAction, /tools\/audio-probe\.mjs/);
+  });
+});
+
+// 녹음 전송 경로: 음성 지원 여부를 모를 때 실제 녹음보다 먼저 토큰 비교 점검을 한다.
+function makeSendFetch({ probeAudioTokens, probeControlTokens = 38, withUsage = true }) {
+  const log = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const userMsg = body.messages.find((m) => m.role === "user");
+    const hasAudio = Array.isArray(userMsg.content);
+    const text = hasAudio ? userMsg.content[0].text : userMsg.content;
+    const isProbe = /첨부된 오디오에 들리는 소리/.test(text);
+    log.push(`${isProbe ? "probe" : "main"}:${hasAudio ? "audio" : "text"}`);
+    const usage = withUsage ? { usage: { prompt_tokens: isProbe ? (hasAudio ? probeAudioTokens : probeControlTokens) : 900 } } : {};
+    return makeJsonResponse(200, { choices: [{ message: { content: isProbe ? "없음" : `{"from":"${hasAudio ? "audio" : "transcript"}"}` } }], ...usage });
+  };
+  return { fetchImpl, log };
+}
+
+function sendArgs(overrides = {}) {
+  const detected = [];
+  const logs = [];
+  return {
+    detected,
+    logs,
+    args: {
+      blob: new Blob([new Uint8Array(4096)], { type: "audio/wav" }),
+      rawMime: "audio/wav",
+      promptAudio: { system: "규칙", user: "음성 분석 자료" },
+      promptTranscript: { system: "규칙", user: "대본 분석 자료" },
+      label: "single_1",
+      transcriptText: "[1] 대본 한 줄",
+      uploadMode: "hybrid_auto",
+      gatewayAudioSupport: "unknown",
+      keyProtocolScope: "openai_ok",
+      selectedModel: "gemini-3-flash",
+      customModel: "",
+      syncedModels: [],
+      baseUrl: "https://gw-send.example.com",
+      apiKey: "sk-test-key",
+      localProxyAvailable: false,
+      onLog: (msg, level) => logs.push({ msg, level }),
+      onAudioSupportDetected: (s) => detected.push(s),
+      ...overrides
+    }
+  };
+}
+
+test("recording path falls back to the transcript when the gateway silently drops audio", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl, log } = makeSendFetch({ probeAudioTokens: 39 });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const { args, detected } = sendArgs();
+    const res = await sendAudioOrTranscriptAndDispose(args);
+    assert.equal(res.text, '{"from":"transcript"}');
+    assert.deepEqual(detected, ["unsupported"]);
+    assert.deepEqual(log, ["probe:text", "probe:audio", "main:text"]); // 실제 녹음은 보내지 않음
+  });
+});
+
+test("recording path marks audio supported only after the token check passes", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl, log } = makeSendFetch({ probeAudioTokens: 102 });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const { args, detected } = sendArgs();
+    const res = await sendAudioOrTranscriptAndDispose(args);
+    assert.equal(res.text, '{"from":"audio"}');
+    assert.deepEqual(detected, ["supported"]);
+    assert.deepEqual(log, ["probe:text", "probe:audio", "main:audio"]);
+
+    // 이미 확인된 뒤(supported)에는 다시 점검하지 않는다
+    log.length = 0;
+    const again = sendArgs({ gatewayAudioSupport: "supported" });
+    await sendAudioOrTranscriptAndDispose(again.args);
+    assert.deepEqual(log, ["main:audio"]);
+  });
+});
+
+test("audio-only mode refuses to analyze when audio is dropped and there is no transcript", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl, log } = makeSendFetch({ probeAudioTokens: 38 });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const { args, detected } = sendArgs({ uploadMode: "audio_only_force", transcriptText: "" });
+    await assert.rejects(() => sendAudioOrTranscriptAndDispose(args), /모델까지 전달하지 않아/);
+    assert.deepEqual(detected, ["unsupported"]);
+    assert.deepEqual(log, ["probe:text", "probe:audio"]);
+  });
+});
+
+test("without usage info the recording is still sent after one check, but never marked supported", async () => {
+  resetGatewayFeatureCache();
+  const { fetchImpl, log } = makeSendFetch({ withUsage: false });
+  await withStubbedGlobals({ withLocalhostWindow: true, fetchImpl }, async () => {
+    const first = sendArgs();
+    const res = await sendAudioOrTranscriptAndDispose(first.args);
+    assert.equal(res.text, '{"from":"audio"}');
+    assert.deepEqual(first.detected, []);
+    assert.ok(first.logs.some((l) => /확인하지 못했습니다/.test(l.msg)));
+
+    // 같은 게이트웨이·모델은 판정 보류를 기억해 구간마다 다시 점검하지 않는다
+    log.length = 0;
+    const second = sendArgs();
+    await sendAudioOrTranscriptAndDispose(second.args);
+    assert.deepEqual(log, ["main:audio"]);
+  });
 });

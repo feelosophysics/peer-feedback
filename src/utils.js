@@ -155,3 +155,20 @@ export function parseModelJson(rawText) {
     throw firstErr;
   }
 }
+
+/**
+ * 피드백 입력란은 마크다운을 렌더링하지 않으므로 남은 서식 기호를 걷어낸다.
+ * "- " 목록과 빈 줄은 그대로 두고, *·• 목록 기호는 "- "로 맞춘다.
+ */
+export function sanitizeDraftText(raw) {
+  return String(raw || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
+    .replace(/^([ \t]*)[*•][ \t]+/gm, "$1- ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

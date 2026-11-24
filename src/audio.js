@@ -47,6 +47,16 @@ export function createSilentWavBlob(durationSec = 0.4, sampleRate = TARGET_WAV_S
   return encodeMonoPcmToWavBlob(new Float32Array(numSamples), sampleRate);
 }
 
+// 음성 전달 점검용 신호음 WAV. 무음은 중간에서 잘려도 티가 나지 않으므로 소리가 있는 신호를 쓴다.
+export function createToneWavBlob(durationSec = 2, sampleRate = TARGET_WAV_SAMPLE_RATE, freqHz = 440) {
+  const numSamples = Math.max(1, Math.round(durationSec * sampleRate));
+  const samples = new Float32Array(numSamples);
+  for (let i = 0; i < numSamples; i++) {
+    samples[i] = Math.sin((2 * Math.PI * freqHz * i) / sampleRate) * 0.25;
+  }
+  return encodeMonoPcmToWavBlob(samples, sampleRate);
+}
+
 export async function convertAudioBlobToWav16kMono(blob, onWarn) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
