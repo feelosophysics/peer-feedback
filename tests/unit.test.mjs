@@ -187,7 +187,7 @@ test("every prompt builder splits role/rules (system) from conversation material
     assert.equal(typeof p.system, "string");
     assert.equal(typeof p.user, "string");
     // 공통 상황 블록은 system에만
-    assert.match(p.system, /코디세이/);
+    assert.match(p.system, /대면 동료평가 대화/);
     assert.match(p.system, /마크다운은 렌더링되지 않습니다/);
     assert.match(p.system, /2000자/);
     assert.doesNotMatch(p.system, /NDA/);

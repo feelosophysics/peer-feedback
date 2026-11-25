@@ -28,5 +28,5 @@ export const GATEWAY_MODEL_CATALOG = [
   { id: "gpt-5.5", label: "gpt-5.5 (OpenAI · 2.0x · 최고급)", weight: 2.0, audioCapable: false }
 ];
 
-// 코디세이 피드백 입력란 글자 수 상한
+// 동료평가 플랫폼의 피드백 입력란 글자 수 상한
 export const DRAFT_CHAR_LIMIT = 2000;

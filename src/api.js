@@ -889,13 +889,13 @@ export async function sendAudioOrTranscriptAndDispose({
     );
   }
 
-  // 1) 음성 외부 무전송 모드
+  // 1) 받아적기 전용 모드 (게이트웨이로 음성을 보내지 않음)
   if (uploadMode === "speech_text_only") {
     blob = null;
     if (!cleanTranscript) {
-      throw new Error("음성 외부 무전송 모드인데 수집된 대본이 비어 있습니다. 일반 Google Chrome으로 녹음하거나 보조 대본 칸에 내용을 입력해 주세요.");
+      throw new Error("받아적기 전용 모드인데 수집된 대본이 비어 있습니다. 일반 Google Chrome으로 녹음하거나 보조 대본 칸에 내용을 입력해 주세요.");
     }
-    onLog?.(`${label}: 음성 외부 무전송 — 대본(${cleanTranscript.length}자)만 게이트웨이로 전송`, "ok");
+    onLog?.(`${label}: 게이트웨이로 음성 미전송 — 대본(${cleanTranscript.length}자)만 게이트웨이로 전송`, "ok");
     return await callLLMWithFallback({
       baseUrl,
       apiKey,

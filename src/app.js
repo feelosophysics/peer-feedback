@@ -232,6 +232,7 @@ function syncUploadModeUi() {
   if (el.completedSegmentMetricItem) el.completedSegmentMetricItem.classList.toggle("hidden", isTextOnly);
   if (el.btnRotateChunk) el.btnRotateChunk.classList.toggle("hidden", isTextOnly);
   if (el.btnImportFile) el.btnImportFile.classList.toggle("hidden", isTextOnly);
+  if (el.btnStopOnly) el.btnStopOnly.classList.toggle("hidden", !isTextOnly);
   syncConnectionIndicators();
 }
 
@@ -888,15 +889,16 @@ async function synthesizeFinalResultFromNotes() {
   addAuditLog(el, "전체 구간 종합 피드백 초안 생성 완료 (모든 음성 파일 이미 폐기됨)", "ok");
 }
 
-function validateCredentialsOrAlert(actionName) {
+function validateCredentialsOrAlert(actionName, hint = "") {
+  const suffix = hint ? `\n${hint}` : "";
   if (!getGatewayBaseUrl()) {
-    showError(el, `${actionName} 전에 상단 연결 설정에서 게이트웨이 API Base URL을 입력해 주세요.`);
+    showError(el, `${actionName} 전에 상단 연결 설정에서 게이트웨이 API Base URL을 입력해 주세요.${suffix}`);
     if (el.setupDetails) el.setupDetails.open = true;
     el.gatewayBaseUrlInput.focus();
     return false;
   }
   if (!getApiKey()) {
-    showError(el, `${actionName} 전에 상단 연결 설정에서 OpenAI 호환 Virtual Key를 입력해 주세요.`);
+    showError(el, `${actionName} 전에 상단 연결 설정에서 OpenAI 호환 Virtual Key를 입력해 주세요.${suffix}`);
     if (el.setupDetails) el.setupDetails.open = true;
     el.apiKeyInput.focus();
     return false;
@@ -906,7 +908,10 @@ function validateCredentialsOrAlert(actionName) {
 
 async function startRecording() {
   showError(el, "");
-  if (!validateCredentialsOrAlert("녹음 시작")) return;
+  const isTextOnly = el.uploadModeSelect.value === "speech_text_only";
+  // 받아적기 전용 모드는 녹음 중 게이트웨이를 부르지 않으므로 키 없이 시작한다.
+  // 오디오 모드는 녹음 중에도 구간을 게이트웨이로 보내므로 시작 전에 확인한다.
+  if (!isTextOnly && !validateCredentialsOrAlert("녹음 시작")) return;
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -917,7 +922,6 @@ async function startRecording() {
       }
     });
 
-    const isTextOnly = el.uploadModeSelect.value === "speech_text_only";
     const existingTranscript = el.liveTranscriptTextarea.value.trim();
     state.mediaStream = stream;
     state.activeMimeType = isTextOnly ? "" : getSupportedMimeType();
@@ -1024,9 +1028,34 @@ function togglePauseRecording() {
   }
 }
 
+// 받아적기 전용 모드에서 초안을 만들지 않고 녹음만 끝낸다.
+// 대본은 화면과 자동 백업에 남아, 나중에 다시 녹음을 이어 가거나 '이 대본만으로 초안 생성'에 쓸 수 있다.
+async function stopRecordingOnly() {
+  if (state.recordingState !== "recording" && state.recordingState !== "paused") return;
+  showError(el, "");
+  stopMicStreamAndTimers();
+  speech.consumeSegmentTranscript(state.currentSegmentIndex);
+  persistTranscriptBackupNow();
+  state.recordingState = "idle";
+  syncRecordingButtons();
+  const hasTranscript = el.liveTranscriptTextarea.value.trim().length > 0;
+  updateStatusBadge(el, "idle", hasTranscript ? "녹음 종료 · 대본 보관됨" : "녹음 종료");
+  addAuditLog(
+    el,
+    hasTranscript
+      ? `녹음 종료 (${formatDuration(state.totalActiveSeconds)}) · 초안 생성 없이 대본을 화면과 자동 백업에 보관했습니다.`
+      : "녹음 종료 · 받아적은 내용이 없습니다.",
+    "info"
+  );
+}
+
 async function stopAndGenerateAll() {
   showError(el, "");
-  if (!validateCredentialsOrAlert("초안 생성")) return;
+  const stopOnlyHint =
+    el.uploadModeSelect.value === "speech_text_only"
+      ? "초안 없이 끝내려면 '녹음만 종료'를 누르세요. 대본은 그대로 보관됩니다."
+      : "";
+  if (!validateCredentialsOrAlert("초안 생성", stopOnlyHint)) return;
 
   state.recordingState = "stopping";
   state.isBusy = true;
@@ -1543,6 +1572,7 @@ function bindEvents() {
   el.btnPauseRec.addEventListener("click", togglePauseRecording);
   el.btnRotateChunk.addEventListener("click", () => rotateSegmentNow(true));
   el.btnStopAndGenerate.addEventListener("click", stopAndGenerateAll);
+  el.btnStopOnly.addEventListener("click", stopRecordingOnly);
   el.btnGenerateFromTranscript.addEventListener("click", generateFromTranscriptOnly);
 
   el.btnImportFile.addEventListener("click", () => el.audioFileInput.click());

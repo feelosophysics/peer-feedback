@@ -109,7 +109,7 @@
               <div class="field">
                 <label for="uploadModeSelect">음성 처리 방식</label>
                 <select id="uploadModeSelect">
-                  <option value="speech_text_only" selected>실시간 받아적기 전용 (기본 · 음성 외부 무전송)</option>
+                  <option value="speech_text_only" selected>실시간 받아적기 전용 (기본 · 게이트웨이로 음성 미전송)</option>
                   <option value="hybrid_auto">게이트웨이 오디오 우선 (16kHz WAV · 미지원 시 받아적기)</option>
                   <option value="audio_only_force">오디오 WAV 전송 전용 (대본 폴백 없이 직접 전송)</option>
                 </select>
@@ -159,6 +159,7 @@
             <button id="btnStartRec" class="btn-record" type="button">● 녹음 시작</button>
             <button id="btnPauseRec" class="btn-secondary" type="button" disabled>❚❚ 일시정지</button>
             <button id="btnStopAndGenerate" class="btn-success" type="button" disabled>■ 평가 종료 및 초안 생성</button>
+            <button id="btnStopOnly" class="btn-secondary" type="button" disabled>■ 녹음만 종료</button>
           </div>
           <div class="controls-secondary">
             <button id="btnRotateChunk" class="btn-ghost btn-sm hidden" type="button" disabled>구간 중간 요약</button>

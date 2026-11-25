@@ -50,6 +50,7 @@ export function collectElements() {
     btnPauseRec: document.getElementById("btnPauseRec"),
     btnRotateChunk: document.getElementById("btnRotateChunk"),
     btnStopAndGenerate: document.getElementById("btnStopAndGenerate"),
+    btnStopOnly: document.getElementById("btnStopOnly"),
     btnImportFile: document.getElementById("btnImportFile"),
     audioFileInput: document.getElementById("audioFileInput"),
     chunkStatusBox: document.getElementById("chunkStatusBox"),
@@ -623,6 +624,9 @@ export function updateRecordingButtons(el, { recordingState, isBusy }) {
   el.btnPauseRec.disabled = isBusy || (recordingState !== "recording" && recordingState !== "paused");
   el.btnRotateChunk.disabled = isBusy || (recordingState !== "recording" && recordingState !== "paused");
   el.btnStopAndGenerate.disabled = isBusy || (recordingState !== "recording" && recordingState !== "paused");
+  if (el.btnStopOnly) {
+    el.btnStopOnly.disabled = isBusy || (recordingState !== "recording" && recordingState !== "paused");
+  }
   el.btnImportFile.disabled = isBusy || recordingState !== "idle";
   el.btnGenerateFromTranscript.disabled = isBusy || recordingState !== "idle";
 
